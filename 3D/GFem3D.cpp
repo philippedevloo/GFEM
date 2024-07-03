@@ -103,7 +103,7 @@ int main() {
 
     TPZGeoMesh *gmesh = 0;
     
-    if(0) {
+    if(1) {
         gmesh = ReadGmsh("Reference.msh");
         //TPZGeoMesh *gmesh = ReadGmsh("quadmesh.msh");
         AdjustGeoMesh(gmesh);
@@ -406,6 +406,7 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
     }
 
     // cmesh->AutoBuild(matidsh1);
+    cmesh->SetDefaultOrder(1);
     cmesh->ApproxSpace().SetAllCreateFunctionsContinuous();
     std::set<int> matids = {volmat,BCb,BCt};
     {
@@ -588,15 +589,49 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
 {
 
     TPZLinearAnalysis an(cmesh,RenumType::EMetis);
-    // TPZSkylineStructMatrix<STATE> strmat(cmeshH1);
-    TPZSSpStructMatrix<STATE> strmat(cmesh);
+    TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    // TPZSSpStructMatrix<STATE> strmat(cmesh);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> step;
     step.SetDirect(ELDLt);
     an.SetSolver(step);
     an.Assemble();
+    if (1)
+    {
+        int nel = cmesh->NElements();
+        TPZFMatrix<STATE> &sol = cmesh->Solution();
+        for (int iel = 0; iel < nel; iel++)
+        {
+            TPZCompEl *cel = cmesh->ElementVec()[iel];
+            if (!cel)
+                continue;
+            TPZGeoEl *gel = cel->Reference();
+            if (!gel)
+                continue;
+            for(int in = 0; in < gel->NCornerNodes(); in++) {
+                TPZManVector<REAL,3> xco(3);
+                gel->NodePtr(in)->GetCoordinates(xco);
+                TPZConnect &c = cel->Connect(in);
+                int64_t seqnum = c.SequenceNumber();
+                int64_t pos = cmesh->Block().Position(seqnum);
+                sol(pos+2,0) = xco[2];
+            }
+        }
+        std::ofstream out("cmeshFixed.txt");
+        cmesh->Print(out);
+        PrintResults(cmesh,"Imposed");
+        TPZMatrixSolver<STATE> *solve = dynamic_cast<TPZMatrixSolver<STATE> *>(an.Solver());
+        TPZAutoPointer<TPZMatrix<STATE>> matptr = solve->Matrix();
+        TPZFMatrix<STATE> &rhs = an.Rhs();
+        TPZFMatrix<STATE> &meshsol = cmesh->Solution();
+        TPZFMatrix<STATE> loc(rhs.Rows(),1,0.);
+        matptr->Multiply(meshsol,loc);
+        loc-=rhs;
+        std::ofstream out2("residual.txt");
+        an.PrintVectorByElement(out2,loc);
+        int nvar = an.Solution().Rows();
+    }
 
-    int nvar = an.Solution().Rows();
 //  Solve the system of equations and save the solutions: phi_0 e phi_1 
     an.Solve();
     if (1)
@@ -784,14 +819,14 @@ void InsertMaterialObjectsElasticity3D(TPZCompMesh *cmesh_m){
 
     // 2.3 Neumann traction condition on the top
     val2[2] = 100.;
-    auto bnd3 = material->CreateBC(material, BCt, 1, val1, val2);
+    auto bnd3 = material->CreateBC(material, BCb, 1, val1, val2);
     cmesh_m->InsertMaterialObject(bnd3);
     val2.Fill(0.);
     // 2.4 Mixed condition on the bottom
     // val1(1,1) = 1000.;
-    val2[0] = 1.;
-    auto bnd4 = material->CreateBC(material, BCb, 0, val1, val2);
-    bnd4->SetForcingFunctionBC(disp,1);
+    val2[0] = 0.;
+    auto bnd4 = material->CreateBC(material, BCt, 0, val1, val2);
+    // bnd4->SetForcingFunctionBC(disp,1);
     cmesh_m->InsertMaterialObject(bnd4);
 
 }
