@@ -3,6 +3,8 @@
  */
 
 #include "pzlog.h"
+
+#include "TPZAcademicGeoMesh.h"
 #include "pzinterpolationspace.h"
 #include "pzcheckgeom.h"
 #include "pzstepsolver.h"
@@ -99,16 +101,35 @@ int main() {
     TPZLogger::InitializePZLOG();
 #endif
 
-    TPZGeoMesh *gmesh = ReadGmsh("Reference.msh");
-    //TPZGeoMesh *gmesh = ReadGmsh("quadmesh.msh");
-    AdjustGeoMesh(gmesh);
-
+    TPZGeoMesh *gmesh = 0;
+    
+    if(0) {
+        gmesh = ReadGmsh("Reference.msh");
+        //TPZGeoMesh *gmesh = ReadGmsh("quadmesh.msh");
+        AdjustGeoMesh(gmesh);
+    } else 
+    {
+        int nel = 5;
+        TPZAcademicGeoMesh acadgmesh(nel,TPZAcademicGeoMesh::ETetrahedra);
+        TPZVec<int> bcids(6,outer);
+        bcids[0] = BCt;
+        bcids[5] = BCb;
+        acadgmesh.SetBCIDVector(bcids);
+        gmesh = acadgmesh.CreateGeoMesh();
+    }
     {
         std::ofstream out("gmesh.txt");
         gmesh->Print(out);
 
+        int64_t nel = gmesh->NElements();
+        TPZVec<REAL> area(nel,0.);
+        for(int64_t el = 0; el<nel; el++) {
+            TPZGeoEl *gel = gmesh->Element(el);
+            if(gel->Dimension() == 3)
+                area[el] = 1./gel->Volume();
+        }
         std::ofstream out2("gmesh.vtk"); 
-        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out2);
+        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out2,area);
     }
 
     if(0)
@@ -630,6 +651,7 @@ void PrintResults(TPZCompMesh *cmesh, std::string plotfile)
                     fields.Push("StressZ");
                     fields.Push("Displacement");
                     fields.Push("VonMises");
+                    fields.Push("Strain");
                 }
             }
             break;
@@ -729,6 +751,20 @@ void InsertMaterialObjectsDarcyMF(TPZMultiphysicsCompMesh *cmesh_m){
 
 #include "Elasticity/TPZElasticity3D.h"
 
+void disp(const TPZVec<REAL> &x, TPZVec<REAL> &disp, TPZFMatrix<REAL> &grad) {
+    disp[2] = 1.;
+    disp[1] = 0;
+    disp[0] = 0;
+    grad(0,0) = 0.;
+    grad(1,0) = 0.;
+    grad(2,0) = 0.;
+    grad(0,1) = 0.;
+    grad(1,1) = 0.;
+    grad(2,1) = 1.;
+    grad(0,2) = 0.;
+    grad(1,2) = -1.;
+    grad(2,2) = 0.;
+}
 /// @brief Insert material objects int the multiphysics mesh
 void InsertMaterialObjectsElasticity3D(TPZCompMesh *cmesh_m){
     int dim = cmesh_m->Dimension();
@@ -736,6 +772,8 @@ void InsertMaterialObjectsElasticity3D(TPZCompMesh *cmesh_m){
     STATE E = 100., nu = 0.;
     TPZManVector<STATE> force(3,0.);
     TPZElasticity3D *material = new TPZElasticity3D(volmat,E,nu,force);
+    force[2] = 1.;
+    material->SetPostProcessingDirection(force);
     //  material->SetBigNumber(10e8);
      cmesh_m->InsertMaterialObject(material);
      materialIDs.insert(volmat);
@@ -745,14 +783,15 @@ void InsertMaterialObjectsElasticity3D(TPZCompMesh *cmesh_m){
     TPZManVector<STATE> val2(dim,0.);
 
     // 2.3 Neumann traction condition on the top
-    val2[2] = 0.;
+    val2[2] = 100.;
     auto bnd3 = material->CreateBC(material, BCt, 1, val1, val2);
     cmesh_m->InsertMaterialObject(bnd3);
     val2.Fill(0.);
     // 2.4 Mixed condition on the bottom
     // val1(1,1) = 1000.;
-    val2[1] = 1.;
+    val2[0] = 1.;
     auto bnd4 = material->CreateBC(material, BCb, 0, val1, val2);
+    bnd4->SetForcingFunctionBC(disp,1);
     cmesh_m->InsertMaterialObject(bnd4);
 
 }
