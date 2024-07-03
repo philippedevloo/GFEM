@@ -45,6 +45,9 @@
 #include "TPZGeoLinear.h"
 
 #include "TPZGFemCompMesh.h"
+
+#include "TPZRefPatternDataBase.h"
+#include "TPZRefPatternTools.h"
 #include <iostream>
 
 using namespace pzgeom;
@@ -105,6 +108,7 @@ simultype simtype = GFemNofrac;
 
 int main() {
 
+    gRefDBase.InitializeRefPatterns(3);
 #ifdef PZ_LOG
     TPZLogger::InitializePZLOG();
 #endif
@@ -137,7 +141,7 @@ int main() {
                 area[el] = 1./gel->Volume();
         }
         std::ofstream out2("gmesh.vtk"); 
-        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out2,area);
+        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out2,area,true);
     }
 
     if(0)
@@ -191,10 +195,116 @@ TPZGeoMesh *ReadGmsh(const std::string &meshfilename)
     return gmesh;
 }
 
+void ProjectNodes(TPZGeoMesh *gmesh) {
+    int64_t nelem = gmesh->NElements();
+    for(int64_t el = 0; el<nelem; el++) {
+        TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->Dimension() != 2) continue;
+        int matid = gel->MaterialId();
+        if(matid != outer) continue;
+        if(gel->HasSubElement()) continue;
+        for(int is = gel->NCornerNodes(); is<gel->NSides()-1; is++) {
+            TPZGeoElSide gelside(gel,is);
+            if(gelside.Dimension() != 1) DebugStop();
+            TPZManVector<REAL,3> xco1(3,0.),xco2(3,0.);
+            int s1 = gel->SideNodeLocIndex(is,0);
+            int s2 = gel->SideNodeLocIndex(is,1);
+            gel->NodePtr(s1)->GetCoordinates(xco1);
+            gel->NodePtr(s2)->GetCoordinates(xco2);
+            if(fabs(xco1[2]-xco2[2]) < 1.e-6) {
+                TPZStack<TPZGeoElSide> neighbours;
+                neighbours.push_back(gelside);
+                gelside.AllNeighbours(neighbours);
+                for(auto neighbour : neighbours) {
+                    TPZGeoEl *neighgel = neighbour.Element();
+                    if(neighgel->HasSubElement()) continue;
+                    TPZManVector<int,7> sidestorefine(neighgel->NSides(),0);
+                    sidestorefine[neighbour.Side()] = 1;
+                    auto refpat = TPZRefPatternTools::PerfectMatchRefPattern(neighbour.Element(),sidestorefine);
+                    neighbour.Element()->SetRefPattern(refpat);
+                    TPZStack<TPZGeoEl *> sons;
+                    neighbour.Element()->Divide(sons);
+                }
+            }
+        }
+    }
+    std::set<REAL> angle;
+    REAL radius;
+    for(int64_t el = 0; el<nelem; el++) {
+        TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->Dimension() != 2) continue;
+        int matid = gel->MaterialId();
+        if(matid != outer) continue;
+        for(int in = 0; in < gel->NCornerNodes(); in++) {
+            TPZManVector<REAL,3> xco(3);
+            gel->NodePtr(in)->GetCoordinates(xco);
+            if(fabs(xco[2]) > 1.e-6) continue;
+            REAL norm = 0.;
+            for(int i = 0; i<2; i++) norm += xco[i]*xco[i];
+            norm = sqrt(norm);
+            radius = norm;
+            for(int i = 0; i<2; i++) xco[i] /= norm;
+            REAL anglel = atan2(xco[1],xco[0]);
+            angle.insert(anglel);
+        }
+    }
+    for(int64_t el = 0; el<nelem; el++) {
+        TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->Dimension() != 2) continue;
+        int matid = gel->MaterialId();
+        if(matid != outer) continue;
+        for(int in = 0; in < gel->NCornerNodes(); in++) {
+            TPZManVector<REAL,3> xco(3);
+            gel->NodePtr(in)->GetCoordinates(xco);
+            REAL norm = 0.;
+            for(int i = 0; i<2; i++) norm += xco[i]*xco[i];
+            norm = sqrt(norm);
+            for(int i = 0; i<2; i++) xco[i] /= norm;
+            REAL anglel = atan2(xco[1],xco[0]);
+            REAL before,next;
+            before=*angle.begin();
+            if(angle.find(anglel) == angle.end()) {
+                TPZManVector<REAL,3> xco(3,0.);
+                gel->NodePtr(in)->GetCoordinates(xco);
+                before = *angle.begin();
+                for(auto it: angle) {
+                    if(it > anglel) {
+                        next = it;
+                        break;
+                    }
+                    before = it;
+                }
+                TPZManVector<REAL,3> xcol(3,0.),xcor(3,0.);
+                xcol[0] = cos(before)*radius;
+                xcol[1] = sin(before)*radius;
+                xcor[0] = cos(next)*radius;
+                xcor[1] = sin(next)*radius;
+                std::cout << "xco before " << xco << std::endl;
+                xco[0] = 0.5*(xcol[0]+xcor[0]);
+                xco[1] = 0.5*(xcol[1]+xcor[1]);
+                std::cout << "xco after " << xco << std::endl;
+            }
+        }
+    }
+    for(int64_t el = 0; el<nelem; el++) {
+        TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->Dimension() != 2) continue;
+        int matid = gel->MaterialId();
+        if(matid != outer) continue;
+        TPZManVector<REAL,3> normal(3,0.);
+        TPZGeoElSide gelside(gel,gel->NSides()-1);
+        TPZManVector<REAL,3> xi(2,0.);
+        gelside.Normal(xi, normal);
+        std::cout << "Normal " << normal << std::endl;
+    }
+
+}
+
 /// @brief Include the missing boundary elements
 /// @param gmesh
 void AdjustGeoMesh(TPZGeoMesh *gmesh)
 {
+    ProjectNodes(gmesh);
     using namespace pzgeom;
     TPZVec<int64_t> nodeindex = {0};
     TPZGeoElRefPattern<TPZGeoPoint> *p1 = new TPZGeoElRefPattern<TPZGeoPoint>(0, nodeindex, pointmat1, *gmesh);
@@ -606,8 +716,8 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
 {
 
     TPZLinearAnalysis an(cmesh,RenumType::EMetis);
-    // TPZSkylineStructMatrix<STATE> strmat(cmesh);
-    TPZSSpStructMatrix<STATE> strmat(cmesh);
+    TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    // TPZSSpStructMatrix<STATE> strmat(cmesh);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> step;
     step.SetDirect(ELDLt);
