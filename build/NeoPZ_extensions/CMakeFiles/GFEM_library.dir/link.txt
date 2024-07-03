@@ -1,0 +1,2 @@
+/usr/bin/ar qc libGFEM_library.a CMakeFiles/GFEM_library.dir/TPZGFemCompElH1.cpp.o CMakeFiles/GFEM_library.dir/TPZGFemCompMesh.cpp.o CMakeFiles/GFEM_library.dir/TPZGFemDarcyFlow.cpp.o CMakeFiles/GFEM_library.dir/TPZGFemElasticity2D.cpp.o CMakeFiles/GFEM_library.dir/TPZGFemElasticity3D.cpp.o CMakeFiles/GFEM_library.dir/TPZSSpMatRedStructMatrix.cpp.o CMakeFiles/GFEM_library.dir/TPZSSparseMatRed.cpp.o
+/usr/bin/ranlib libGFEM_library.a

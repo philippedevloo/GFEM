@@ -28,7 +28,10 @@
 #include "TPZVTKGeoMesh.h"
 #include "DarcyFlow/TPZDarcyFlow.h"
 #include "DarcyFlow/TPZMixedDarcyFlow.h"
-#include "Projection/TPZL2ProjectionCS.h"                   
+#include "Projection/TPZL2ProjectionCS.h"
+#include "tpzpoint.h"
+#include "pzgeopoint.h"
+#include "TPZElementMatrixT.h"              
 
 #include <fstream>
 #include <ctime>
@@ -84,6 +87,8 @@ void InsertMaterialObjectsElasticity3DMF(TPZMultiphysicsCompMesh *cmesh);
 /// @brief Insert material objects int the multiphysics mesh
 void InsertMaterialObjectsDarcyMF(TPZMultiphysicsCompMesh *cmesh_m);
 
+void exportData(TPZCompMesh *cmesh, int64_t id);
+
 int volmat = 1;//Domain
 int BCt = 2;//PressIn
 int BCb = 3;//PressOut
@@ -92,6 +97,9 @@ int fracedge = 12;//Fracture edge
 int Hole = 15;//Hole
 int noslip = 4;
 int outer = 5;
+int pointmat1 = -1;
+int pointmat2 = -2;
+int pointmat3 = -3;
 enum simultype {H1,GFem,GFemNofrac};
 simultype simtype = GFemNofrac;
 
@@ -187,6 +195,15 @@ TPZGeoMesh *ReadGmsh(const std::string &meshfilename)
 /// @param gmesh
 void AdjustGeoMesh(TPZGeoMesh *gmesh)
 {
+    using namespace pzgeom;
+    TPZVec<int64_t> nodeindex = {0};
+    TPZGeoElRefPattern<TPZGeoPoint> *p1 = new TPZGeoElRefPattern<TPZGeoPoint>(0, nodeindex, pointmat1, *gmesh);
+    nodeindex[0] = 1;
+    TPZGeoElRefPattern<TPZGeoPoint> *p2 = new TPZGeoElRefPattern<TPZGeoPoint>(1, nodeindex, pointmat2, *gmesh);
+    nodeindex[0] = 2;
+    TPZGeoElRefPattern<TPZGeoPoint> *p3 = new TPZGeoElRefPattern<TPZGeoPoint>(2, nodeindex, pointmat3, *gmesh);
+    gmesh->BuildConnectivity();
+
     int numouter = 0;
     int numedge = 0;
     int dim = gmesh->Dimension();
@@ -408,7 +425,7 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
     // cmesh->AutoBuild(matidsh1);
     cmesh->SetDefaultOrder(1);
     cmesh->ApproxSpace().SetAllCreateFunctionsContinuous();
-    std::set<int> matids = {volmat,BCb,BCt};
+    std::set<int> matids = {volmat,BCb,BCt,pointmat1,pointmat2,pointmat3};
     {
         int64_t nel = gmesh->NElements();
         TPZStack<int64_t > gelstack;
@@ -589,8 +606,8 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
 {
 
     TPZLinearAnalysis an(cmesh,RenumType::EMetis);
-    TPZSkylineStructMatrix<STATE> strmat(cmesh);
-    // TPZSSpStructMatrix<STATE> strmat(cmesh);
+    // TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    TPZSSpStructMatrix<STATE> strmat(cmesh);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> step;
     step.SetDirect(ELDLt);
@@ -627,9 +644,19 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
         TPZFMatrix<STATE> loc(rhs.Rows(),1,0.);
         matptr->Multiply(meshsol,loc);
         loc-=rhs;
+        an.LoadSolution(loc);
+        PrintResults(cmesh,"Residual");
         std::ofstream out2("residual.txt");
-        an.PrintVectorByElement(out2,loc);
+        std::ofstream out3("rhs.txt");
+        std::ofstream out4("mat.txt");
+        std::ofstream out5("sol.txt");
+        rhs.Print("rhs",out3,EMathematicaInput);
+        meshsol.Print("sol",out5,EMathematicaInput);
+        matptr->Print("mat",out4,EMathematicaInput);
+        an.PrintVectorByElement(out2,loc, 1.0e-10);
         int nvar = an.Solution().Rows();
+
+        exportData(cmesh,7);
     }
 
 //  Solve the system of equations and save the solutions: phi_0 e phi_1 
@@ -823,12 +850,26 @@ void InsertMaterialObjectsElasticity3D(TPZCompMesh *cmesh_m){
     cmesh_m->InsertMaterialObject(bnd3);
     val2.Fill(0.);
     // 2.4 Mixed condition on the bottom
-    // val1(1,1) = 1000.;
-    val2[0] = 0.;
-    auto bnd4 = material->CreateBC(material, BCt, 0, val1, val2);
+    val2[2] = -100.;
+    auto bnd4 = material->CreateBC(material, BCt, 1, val1, val2);
     // bnd4->SetForcingFunctionBC(disp,1);
     cmesh_m->InsertMaterialObject(bnd4);
 
+    val1(0,0) = 1.;
+    val1(1,1) = 1.;
+    val1(2,2) = 1.;
+    //point mats
+    val2[2] = 0.;
+    auto bnd5 = material->CreateBC(material, pointmat1, 0, val1, val2);
+    cmesh_m->InsertMaterialObject(bnd5);
+
+    val1(1,1) = 0.;
+    auto bnd6 = material->CreateBC(material, pointmat2, 0, val1, val2);
+    cmesh_m->InsertMaterialObject(bnd6);
+
+    val1(0,0) = 0.;
+    auto bnd7 = material->CreateBC(material, pointmat3, 0, val1, val2);
+    cmesh_m->InsertMaterialObject(bnd7);
 }
 
 #include "TPZGFemElasticity3D.h"
@@ -860,3 +901,50 @@ void InsertMaterialObjectsElasticity3DMF(TPZMultiphysicsCompMesh *cmesh_m){
     cmesh_m->InsertMaterialObject(bnd4);
 }
 
+void exportData(TPZCompMesh *cmesh, int64_t id)
+{
+    std::ofstream out("element.nb");
+
+    for (int64_t i = 0; i < cmesh->NElements(); i++)
+    {
+        TPZCompEl *cel = cmesh->ElementVec()[i];
+        if (!cel)
+            continue;
+        
+        TPZGeoEl *gel = cel->Reference();
+        if (!gel)
+            continue;
+        int ncon = cel->NConnects();
+        for (int ic = 0; ic < ncon; ic++)
+        {
+            TPZConnect &c = cel->Connect(ic);
+            int64_t c_index = cel->ConnectIndex(ic);
+            if (c_index == id)
+            {
+                int ncorner = gel->NCornerNodes();
+                TPZFMatrix<REAL> coords(ncorner,3,0.), sol(ncorner*3,1,0.);
+                for (int in = 0; in < gel->NCornerNodes(); in++)
+                {
+                    TPZManVector<REAL,3> xco(3);
+                    gel->NodePtr(in)->GetCoordinates(xco);
+                    sol(3*in+2,0) = xco[2];
+                    for (int d = 0; d < 3; d++)
+                    {
+                        coords(in,d) = xco[d];
+                    }
+                }
+                TPZElementMatrixT<REAL> ek, ef;
+                cel->CalcStiff(ek, ef);
+                out << "ic = " << ic << ";\n";
+                coords.Print("coords=",out,EMathematicaInput);
+                sol.Print("sol=",out,EMathematicaInput);
+                ek.fMat.Print("stiff=",out,EMathematicaInput);
+                ef.fMat.Print("force=",out,EMathematicaInput);
+                TPZFMatrix<REAL> rhs;
+                ek.fMat.Multiply(sol,rhs);
+                rhs-=ef.fMat;
+                rhs.Print("residual=",out,EMathematicaInput);
+            }
+        }
+    }
+}
