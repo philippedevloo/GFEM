@@ -107,7 +107,7 @@ int pointmat1 = -1;
 int pointmat2 = -2;
 int pointmat3 = -3;
 enum simultype {H1,GFem,GFemNofrac};
-simultype simtype = GFemNofrac;
+simultype simtype = GFem;
 
 int main() {
 
@@ -122,11 +122,13 @@ int main() {
         gmesh = ReadGmsh("Reference.msh");
         std::ofstream out2("gmeshbefore.vtk"); 
         TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out2);
-        TPZManVector<REAL,3> angles;
-        auto coords = BottomRadiusNodes(gmesh,angles);
-        std::ofstream out3("angles.nb");
-        coords.Print("coords = ",out3,EMathematicaInput);
-        out3 << "angles = {" << angles << "}" << std::endl;
+        if(0) {
+            TPZManVector<REAL,3> angles;
+            auto coords = BottomRadiusNodes(gmesh,angles);
+            std::ofstream out3("angles.nb");
+            coords.Print("coords = ",out3,EMathematicaInput);
+            out3 << "angles = {" << angles << "}" << std::endl;
+        }
         //TPZGeoMesh *gmesh = ReadGmsh("quadmesh.msh");
         AdjustGeoMesh(gmesh);
     } else 
@@ -172,8 +174,9 @@ int main() {
     int defaultporder = 1;
     int64_t nel = gmesh->NElements();
     auto cmeshH1 = CreateH1CompMesh(gmesh);
-    Simulate(cmeshH1,"H1");
-    return 0;
+    //  Simulate(cmeshH1,"H1");
+    // return 0;
+
     auto cmeshGFem = CreateGFemCompMesh(gmesh);
     auto cmesh_m = CreateMultiphysicsMesh(cmeshH1,cmeshGFem);
     Simulate(cmesh_m,"GFem");
@@ -420,11 +423,12 @@ void AdjustGeoMesh(TPZGeoMesh *gmesh)
 {
     using namespace pzgeom;
     TPZVec<int64_t> nodeindex = {0};
-    TPZGeoElRefPattern<TPZGeoPoint> *p1 = new TPZGeoElRefPattern<TPZGeoPoint>(0, nodeindex, pointmat1, *gmesh);
+    int64_t index;
+    gmesh->CreateGeoElement(EPoint,nodeindex,pointmat1,index);
     nodeindex[0] = 1;
-    TPZGeoElRefPattern<TPZGeoPoint> *p2 = new TPZGeoElRefPattern<TPZGeoPoint>(1, nodeindex, pointmat2, *gmesh);
+    gmesh->CreateGeoElement(EPoint,nodeindex,pointmat2,index);
     nodeindex[0] = 2;
-    TPZGeoElRefPattern<TPZGeoPoint> *p3 = new TPZGeoElRefPattern<TPZGeoPoint>(2, nodeindex, pointmat3, *gmesh);
+    gmesh->CreateGeoElement(EPoint,nodeindex,pointmat3,index);
     gmesh->BuildConnectivity();
 
     int numouter = 0;
@@ -838,7 +842,7 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
     step.SetDirect(ELDLt);
     an.SetSolver(step);
     an.Assemble();
-    if (1)
+    if (0)
     {
         int nel = cmesh->NElements();
         TPZFMatrix<STATE> &sol = cmesh->Solution();
@@ -888,7 +892,8 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
     an.Solve();
     if (1)
     {
-        std::ofstream out("cmeshH1.txt");
+        std::string plotfile = "cmesh"+name+".txt";
+        std::ofstream out(name);
         cmesh->Print(out);
     }
     std::cout << "--------- PostProcess " << name << " ---------" << std::endl;
@@ -1106,6 +1111,8 @@ void InsertMaterialObjectsElasticity3DMF(TPZMultiphysicsCompMesh *cmesh_m){
     STATE E = 100., nu = 0.;
     TPZManVector<STATE> force(3,0.);
     TPZGFemElasticity3D *material = new TPZGFemElasticity3D(volmat,E,nu,force);
+    force[2] = 1.;
+    material->SetPostProcessingDirection(force);
     //  material->SetBigNumber(10e8);
      cmesh_m->InsertMaterialObject(material);
      materialIDs.insert(volmat);
@@ -1116,14 +1123,30 @@ void InsertMaterialObjectsElasticity3DMF(TPZMultiphysicsCompMesh *cmesh_m){
 
     // 2.3 Neumann traction condition on the top
     val2[2] = 100.;
-    auto bnd3 = material->CreateBC(material, BCt, 1, val1, val2);
+    auto bnd3 = material->CreateBC(material, BCb, 1, val1, val2);
     cmesh_m->InsertMaterialObject(bnd3);
     val2.Fill(0.);
     // 2.4 Mixed condition on the bottom
-    //val1(1,1) = 1000.;
-    val2.Fill(0.);
-    auto bnd4 = material->CreateBC(material, BCb, 0, val1, val2);
+    val2[2] = -100.;
+    auto bnd4 = material->CreateBC(material, BCt, 1, val1, val2);
+    // bnd4->SetForcingFunctionBC(disp,1);
     cmesh_m->InsertMaterialObject(bnd4);
+
+    val1(0,0) = 1.;
+    val1(1,1) = 1.;
+    val1(2,2) = 1.;
+    //point mats
+    val2[2] = 0.;
+    auto bnd5 = material->CreateBC(material, pointmat1, 0, val1, val2);
+    cmesh_m->InsertMaterialObject(bnd5);
+
+    val1(1,1) = 0.;
+    auto bnd6 = material->CreateBC(material, pointmat2, 0, val1, val2);
+    cmesh_m->InsertMaterialObject(bnd6);
+
+    val1(0,0) = 0.;
+    auto bnd7 = material->CreateBC(material, pointmat3, 0, val1, val2);
+    cmesh_m->InsertMaterialObject(bnd7);
 }
 
 void exportData(TPZCompMesh *cmesh, int64_t id)
