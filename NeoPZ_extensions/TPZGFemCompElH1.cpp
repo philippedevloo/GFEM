@@ -8,11 +8,11 @@
 
 // Constructor: use the same parameters as TPZCompElH1 and pass them to the TPZCompElH1 constructor
 template<class TSHAPE>
-TPZGFemCompElH1<TSHAPE>::TPZGFemCompElH1(TPZCompMesh &mesh, TPZGeoEl *gel) : TPZCompElH1<TSHAPE>(mesh, gel) {
+TPZGFemCompElH1<TSHAPE>::TPZGFemCompElH1(TPZCompMesh &mesh, TPZGeoEl *gel, GFemcolors color) : TPZCompElH1<TSHAPE>(mesh, gel) {
     // identify the number of H1 functions associated with the element
     fNumH1Functions = this->NShapeF();
     // initialize the color of the element
-    fColor = Black;
+    fColor = color;
     TPZGFemCompMesh *gfemmesh = dynamic_cast<TPZGFemCompMesh *>(&mesh);
     if (!gfemmesh) {
         DebugStop();
@@ -45,12 +45,12 @@ void TPZGFemCompElH1<TSHAPE>::IdentifyActiveConnects() {
 template<class TSHAPE>
 void TPZGFemCompElH1<TSHAPE>::ComputeShape(TPZVec<REAL> &intpoint, TPZMaterialData &data) {
     // call the base class method to compute the shape functions
-    if(fActiveConnectIndexes.size() == 0) {
-        DebugStop();
-    }
     int eldim = TSHAPE::Dimension;
     if(data.fShapeType != TPZMaterialData::EScalarShape) DebugStop();
     TPZCompElH1<TSHAPE>::ComputeShape(intpoint, data);
+    if(fActiveConnectIndexes.size() == 0) {
+        return;
+    }
     TPZMaterialT<STATE> *mat = dynamic_cast<TPZMaterialT<STATE> *>(this->Material());
     int nstate = mat->NStateVariables();
     TPZGFemElasticity2D::AtomicToVec(nstate, data);

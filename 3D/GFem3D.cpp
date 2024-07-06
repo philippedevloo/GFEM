@@ -60,6 +60,13 @@ TPZGeoMesh *ReadGmsh(const std::string &filename);
 /// @param gmesh 
 void AdjustGeoMesh(TPZGeoMesh *gmesh);
 
+/// @brief Separate the elements above and below the fracture
+void BuildBlueRedElements(TPZGeoMesh *gmesh, std::set<int64_t> &blue, std::set<int64_t> &red);
+
+
+/// @brief Separate the connectivity of the elements facing the fracture
+void SeparateFractureConnectivity(TPZGeoMesh *gmesh, int fracturematid, int fracedgematid);
+
 // @brief return the coordinates of the nodes at the bottom of the domain
 TPZFMatrix<REAL> BottomRadiusNodes(TPZGeoMesh *gmesh, TPZVec<REAL> &angles);
 
@@ -106,8 +113,8 @@ int outer = 5;
 int pointmat1 = -1;
 int pointmat2 = -2;
 int pointmat3 = -3;
-enum simultype {H1,GFem,GFemNofrac};
-simultype simtype = GFem;
+enum simultype {Darcy,Elast,DarcyNofrac,ElastNoFrac,DarcyDiscontinuous,ElastDiscontinuous};
+simultype simtype = Elast;
 
 int main() {
 
@@ -118,28 +125,21 @@ int main() {
 
     TPZGeoMesh *gmesh = 0;
     
-    if(1) {
-        gmesh = ReadGmsh("Reference.msh");
-        std::ofstream out2("gmeshbefore.vtk"); 
-        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out2);
-        if(0) {
-            TPZManVector<REAL,3> angles;
-            auto coords = BottomRadiusNodes(gmesh,angles);
-            std::ofstream out3("angles.nb");
-            coords.Print("coords = ",out3,EMathematicaInput);
-            out3 << "angles = {" << angles << "}" << std::endl;
-        }
-        //TPZGeoMesh *gmesh = ReadGmsh("quadmesh.msh");
-        AdjustGeoMesh(gmesh);
-    } else 
-    {
-        int nel = 5;
-        TPZAcademicGeoMesh acadgmesh(nel,TPZAcademicGeoMesh::ETetrahedra);
-        TPZVec<int> bcids(6,outer);
-        bcids[0] = BCt;
-        bcids[5] = BCb;
-        acadgmesh.SetBCIDVector(bcids);
-        gmesh = acadgmesh.CreateGeoMesh();
+    gmesh = ReadGmsh("Reference.msh");
+    std::ofstream out2("gmeshbefore.vtk"); 
+    TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out2);
+    if(0) {
+        TPZManVector<REAL,3> angles;
+        auto coords = BottomRadiusNodes(gmesh,angles);
+        std::ofstream out3("angles.nb");
+        coords.Print("coords = ",out3,EMathematicaInput);
+        out3 << "angles = {" << angles << "}" << std::endl;
+    }
+    //TPZGeoMesh *gmesh = ReadGmsh("quadmesh.msh");
+    AdjustGeoMesh(gmesh);
+
+    if(simtype == ElastDiscontinuous || simtype == DarcyDiscontinuous) {
+        SeparateFractureConnectivity(gmesh,Hole,fracedge);
     }
     {
         std::ofstream out("gmesh.txt");
@@ -174,12 +174,30 @@ int main() {
     int defaultporder = 1;
     int64_t nel = gmesh->NElements();
     auto cmeshH1 = CreateH1CompMesh(gmesh);
-    //  Simulate(cmeshH1,"H1");
-    // return 0;
+    std::string H1name = "H1Darcy";
+    if(simtype == DarcyDiscontinuous) {
+        H1name = "DarcyDiscontinuous";
+    } else if(simtype == ElastDiscontinuous) {
+        H1name = "ElastDiscontinuous";
+    } else if (simtype == Elast) {
+        H1name = "H1Elast";
+    }
 
+    Simulate(cmeshH1,H1name);
+    if(simtype == DarcyDiscontinuous || simtype == ElastDiscontinuous) {
+        return 0;
+    }
     auto cmeshGFem = CreateGFemCompMesh(gmesh);
     auto cmesh_m = CreateMultiphysicsMesh(cmeshH1,cmeshGFem);
-    Simulate(cmesh_m,"GFem");
+    std::string GFemName = "GFemDarcy";
+    if(simtype == DarcyNofrac) {
+        GFemName = "GFemDarcyNofrac";
+    } else if(simtype == ElastNoFrac) {
+        GFemName = "GFemElastNoFrac";
+    } else if(simtype == Elast) {
+        GFemName = "GFemElast";
+    }
+    Simulate(cmesh_m,GFemName);
     CleanUp(cmesh_m);
     return 0;   
 }
@@ -412,7 +430,7 @@ void ProjectNodes(TPZGeoMesh *gmesh) {
         TPZGeoElSide gelside(gel,gel->NSides()-1);
         TPZManVector<REAL,3> xi(2,0.);
         gelside.Normal(xi, normal);
-        std::cout << "Normal " << normal << std::endl;
+        // std::cout << "Normal " << normal << std::endl;
     }
 
 }
@@ -468,6 +486,81 @@ void AdjustGeoMesh(TPZGeoMesh *gmesh)
     std::cout << "Created " << numouter << " bottom boundary elements\n";
     std::cout << "Created " << numedge << " edge boundary elements\n";
 }
+
+void SeparateConnectivity(TPZGeoMesh *gmesh, std::list<TPZGeoElSide> &blueneigh, std::list<TPZGeoElSide> &redneigh) {
+    for(auto gels : blueneigh) {
+        // std::cout << "Blue neighbour " << gels.Element()->Index() << " side " << gels.Side() << std::endl;
+        gels.RemoveConnectivity();
+    }
+    TPZGeoElSide first = blueneigh.front();
+    auto prev = blueneigh.begin();
+    auto gels = prev;
+    gels++;
+    while(gels != blueneigh.end()) {
+        // std::cout << "Prev neighbour " << prev->Element()->Index() << " side " << prev->Side() << std::endl;
+        // std::cout << "Blue neighbour " << gels->Element()->Index() << " side " << gels->Side() << std::endl;
+        prev->SetConnectivity(*gels);
+        prev++;
+        gels++;
+    }
+    prev->SetConnectivity(first);
+    for(auto gels : redneigh) {
+        gels.RemoveConnectivity();
+    }
+    first = redneigh.front();
+    prev = redneigh.begin();
+    gels = prev;
+    gels++;
+    while(gels != redneigh.end()) {
+        prev->SetConnectivity(*gels);
+        prev++;
+        gels++;
+    }
+    prev->SetConnectivity(first);
+}
+
+/// @brief Separate the connectivity of the elements facing the fracture
+void SeparateFractureConnectivity(TPZGeoMesh *gmesh, int fracturematid, int fracedgematid) {
+    std::set<int64_t> blue, red;
+    BuildBlueRedElements(gmesh,blue,red);
+    int64_t nel = gmesh->NElements();
+    for(int64_t el = 0; el<nel; el++) {
+        TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->MaterialId() == fracturematid) {
+            int nsides = gel->NSides();
+            for(int is = 0; is<nsides; is++) {
+                TPZGeoElSide gelside(gel,is);
+                if(gelside.HasNeighbour(fracedgematid)) continue;
+                TPZStack<TPZGeoElSide> neighbours;
+                neighbours.push_back(gelside);
+                gelside.AllNeighbours(neighbours);
+                std::list<TPZGeoElSide> bluefound, redfound;
+                for(auto neighbour : neighbours) {
+                    if(blue.find(neighbour.Element()->Index()) != blue.end()) {
+                        bluefound.push_back(neighbour);
+                        continue;
+                    }
+                    if(red.find(neighbour.Element()->Index()) != red.end()) {
+                        redfound.push_back(neighbour);
+                        continue;
+                    }
+                    int neighmat = neighbour.Element()->MaterialId();
+                    if(neighmat == fracturematid || neighmat == noslip) {
+                        bluefound.push_back(neighbour);
+                        continue;
+                    }
+                    DebugStop();
+                }
+                // if either list is empty, the elements have already been separated
+                if(bluefound.size() && redfound.size()) {
+                    SeparateConnectivity(gmesh,bluefound,redfound);
+                }
+            }
+        }
+    }
+}
+
+
 
 void BuildBlueRedElements(TPZGeoMesh *gmesh, std::set<int64_t> &blue, std::set<int64_t> &red) {
     int64_t nel = gmesh->NElements();
@@ -642,11 +735,14 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
     TPZCompMesh *cmesh = new TPZCompMesh(gmesh);
     switch(simtype)
     {
-        case H1:
+        case Darcy:
+        case DarcyNofrac:
+        case DarcyDiscontinuous:
             InsertMaterialObjectsDarcy(cmesh);
             break;
-        case GFem:
-        case GFemNofrac:
+        case Elast:
+        case ElastNoFrac:
+        case ElastDiscontinuous:
             InsertMaterialObjectsElasticity3D(cmesh);
             break;
     }
@@ -695,13 +791,18 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
     cmesh->SetAllCreateFunctionsContinuous();
     switch(simtype)
     {
-        case H1:
+        case Darcy:
             InsertMaterialObjectsDarcy(cmesh);
             break;
-        case GFem:
+        case Elast:
             InsertMaterialObjectsElasticity3D(cmesh);
             break;
-        case GFemNofrac:
+        case DarcyNofrac:
+        case ElastNoFrac:
+            break;
+        case DarcyDiscontinuous:
+        case ElastDiscontinuous:
+            DebugStop();
             break;
     }
      //o método ApproxSpace().CreateDisconnectedElements(true) é chamado para transformar os elementos em elementos discontinuos, criando assim um espaço L2 de aproximação.
@@ -717,25 +818,25 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
         {
             case EOned:
             {
-                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeLinear >(*cmesh, gel);
+                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeLinear >(*cmesh, gel, Black);
                 cel->SetColor(Black);
             }
             break;
             case ETriangle:
             {
-                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeTriang >(*cmesh, gel);
+                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeTriang >(*cmesh, gel, Black);
                 cel->SetColor(Black);
             }
             break;
             case EQuadrilateral:
             {
-                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeQuad >(*cmesh, gel);
+                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeQuad >(*cmesh, gel, Black);
                 cel->SetColor(Black);
             }
             break;
             case ETetraedro:
             {
-                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeTetra >(*cmesh, gel);
+                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeTetra >(*cmesh, gel, Black);
                 cel->SetColor(Black);
             }
             break;
@@ -784,7 +885,7 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
         }
     }
     cmesh->ExpandSolution();
-    cmesh->IdentifyActiveConnects();
+    cmesh->IdentifyActiveConnectsByElement();
     {
         std::ofstream out("cmeshGFem.txt");
         cmesh->Print(out);
@@ -810,12 +911,17 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
     cmesh_m->SetAllCreateFunctionsMultiphysicElem();
     switch (simtype)
     {
-        case H1:
+        case Darcy:
+        case DarcyNofrac:
             InsertMaterialObjectsDarcyMF(cmesh_m);
             break;
-        case GFem:
-        case GFemNofrac:
+        case Elast:
+        case ElastNoFrac:
             InsertMaterialObjectsElasticity3DMF(cmesh_m);
+            break;
+        case DarcyDiscontinuous:
+        case ElastDiscontinuous:
+            DebugStop();
             break;
     }
 
@@ -842,52 +948,6 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
     step.SetDirect(ELDLt);
     an.SetSolver(step);
     an.Assemble();
-    if (0)
-    {
-        int nel = cmesh->NElements();
-        TPZFMatrix<STATE> &sol = cmesh->Solution();
-        for (int iel = 0; iel < nel; iel++)
-        {
-            TPZCompEl *cel = cmesh->ElementVec()[iel];
-            if (!cel)
-                continue;
-            TPZGeoEl *gel = cel->Reference();
-            if (!gel)
-                continue;
-            for(int in = 0; in < gel->NCornerNodes(); in++) {
-                TPZManVector<REAL,3> xco(3);
-                gel->NodePtr(in)->GetCoordinates(xco);
-                TPZConnect &c = cel->Connect(in);
-                int64_t seqnum = c.SequenceNumber();
-                int64_t pos = cmesh->Block().Position(seqnum);
-                sol(pos+2,0) = xco[2];
-            }
-        }
-        std::ofstream out("cmeshFixed.txt");
-        cmesh->Print(out);
-        PrintResults(cmesh,"Imposed");
-        TPZMatrixSolver<STATE> *solve = dynamic_cast<TPZMatrixSolver<STATE> *>(an.Solver());
-        TPZAutoPointer<TPZMatrix<STATE>> matptr = solve->Matrix();
-        TPZFMatrix<STATE> &rhs = an.Rhs();
-        TPZFMatrix<STATE> &meshsol = cmesh->Solution();
-        TPZFMatrix<STATE> loc(rhs.Rows(),1,0.);
-        matptr->Multiply(meshsol,loc);
-        loc-=rhs;
-        an.LoadSolution(loc);
-        PrintResults(cmesh,"Residual");
-        std::ofstream out2("residual.txt");
-        std::ofstream out3("rhs.txt");
-        std::ofstream out4("mat.txt");
-        std::ofstream out5("sol.txt");
-        rhs.Print("rhs",out3,EMathematicaInput);
-        meshsol.Print("sol",out5,EMathematicaInput);
-        matptr->Print("mat",out4,EMathematicaInput);
-        an.PrintVectorByElement(out2,loc, 1.0e-10);
-        int nvar = an.Solution().Rows();
-
-        exportData(cmesh,7);
-    }
-
 //  Solve the system of equations and save the solutions: phi_0 e phi_1 
     an.Solve();
     if (1)
@@ -922,14 +982,15 @@ void PrintResults(TPZCompMesh *cmesh, std::string plotfile)
     int dim = cmesh->Dimension();
     switch(simtype)
     {
-        case H1:
-            plotfile += "_darcy";
+        case Darcy:
+        case DarcyNofrac:
+        case DarcyDiscontinuous:
             fields.Push("Pressure");
             fields.Push("Flux");
             break;
-        case GFem:
-        case GFemNofrac:
-            plotfile += "_elast";
+        case Elast:
+        case ElastNoFrac:
+        case ElastDiscontinuous:
             {
                 if(dim == 2) {
                     fields.Push("SigmaX");
@@ -946,6 +1007,29 @@ void PrintResults(TPZCompMesh *cmesh, std::string plotfile)
                     fields.Push("Strain");
                 }
             }
+            break;
+        default:
+            DebugStop();
+    }
+    switch(simtype)
+    {
+        case Darcy:
+            plotfile += "_darcy";
+            break;
+        case DarcyNofrac:
+            plotfile += "_darcy_nofrac";
+            break;
+        case DarcyDiscontinuous:
+            plotfile += "_darcy_disc";
+            break;
+        case Elast:
+            plotfile += "_elast";
+            break;
+        case ElastNoFrac:
+            plotfile += "_elast_nofrac";
+            break;
+        case ElastDiscontinuous:
+            plotfile += "_elast_disc";
             break;
         default:
             DebugStop();

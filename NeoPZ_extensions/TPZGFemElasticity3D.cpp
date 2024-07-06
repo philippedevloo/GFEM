@@ -61,6 +61,8 @@ void TPZGFemElasticity3D::Contribute(const TPZVec<TPZMaterialDataT<STATE>> &data
         DebugStop();
     }
     TPZElasticity3D::Contribute(datalocal,weight,ek,ef);
+    // ek.Print("ek = ",std::cout,EMathematicaInput);
+    // std::cout << "norm ek " << Norm(ek) << std::endl;
 }
 
 void TPZGFemElasticity3D::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &data,

@@ -3,12 +3,13 @@
 
 #include "TPZCompElH1.h"
 #include "TPZGFemCompMesh.h"
+#include "TPZFrac2d.h"
 
 template<class TSHAPE>
 class TPZGFemCompElH1 : public TPZCompElH1<TSHAPE> {
 public:
     // Constructor: use the same parameters as TPZCompElH1 and pass them to the TPZCompElH1 constructor
-    TPZGFemCompElH1(TPZCompMesh &mesh, TPZGeoEl *gel);
+    TPZGFemCompElH1(TPZCompMesh &mesh, TPZGeoEl *gel, GFemcolors color);
 
     /// computes the shape functions in the master element AND its derivatives
     void ComputeShape(TPZVec<REAL> &intpoint, TPZMaterialData &data) override;

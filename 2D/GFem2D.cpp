@@ -40,6 +40,10 @@
 #include "TPZGeoLinear.h"
 
 #include "TPZGFemCompMesh.h"
+
+#include "TPZRefPatternDataBase.h"
+#include "TPZRefPatternTools.h"
+
 #include <iostream>
 
 using namespace pzgeom;
@@ -47,6 +51,18 @@ using namespace pzgeom;
 /// @param filename 
 /// @return a geometric mesh
 TPZGeoMesh *ReadGmsh(const std::string &filename);
+
+/// @brief Refine towards the fracture edge
+void RefineTowardsFrac(TPZGeoMesh *gmesh,int nref);
+
+/// @brief Identify the fracture edge coordinates
+void FractureEnds(TPZGeoMesh *gmesh, TPZVec<REAL> &fracend);
+
+/// @brief Choose the elements to be enriched based on their distance to the fracture
+/// @param gmesh geometric mesh that contains the elements
+/// @param radius distance from the fracture edge
+/// @param enrichedelements elements to be enriched
+void ElementsToEnrich(TPZGeoMesh *gmesh, TPZVec<REAL> &fracend, REAL radius, std::set<int64_t> &enrichedelements);
 
 /// @brief Create a computational mesh with H1 elements
 TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh);
@@ -85,8 +101,11 @@ int BCt = 4;
 int BCl = 5;
 int cutmat = 6;
 int fracedge = 7;
+REAL edgelength = 0.1;
 
 int main() {
+
+    gRefDBase.InitializeRefPatterns(3);
 
 #ifdef PZ_LOG
     TPZLogger::InitializePZLOG();
@@ -104,8 +123,10 @@ int main() {
     }
 
     TPZCheckGeom check(gmesh);
-    int uniform = 0;
+    int uniform = 1;
     check.UniformRefine(uniform);
+
+    RefineTowardsFrac(gmesh,2);
 
     {
         std::ofstream out4("gmeshfine.txt");
@@ -152,11 +173,38 @@ TPZGeoMesh *ReadGmsh(const std::string &meshfilename)
     return gmesh;
 }
 
+/// @brief Identify the fracture edge coordinates
+void FractureEnds(TPZGeoMesh *gmesh, TPZVec<REAL> &fracend)
+{
+    int64_t nel = gmesh->NElements();
+    for(int64_t el = 0; el<nel; el++) {
+        TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->MaterialId() == fracedge) {
+            TPZManVector<REAL,3> center(0,0.);
+            gel->X(center,fracend);
+            return;
+        }
+    }
+}
+
+/// @brief Refine towards the fracture edge
+void RefineTowardsFrac(TPZGeoMesh *gmesh,int nref)
+{
+    std::set<int> matids = {fracedge};
+    for(int iref = 0; iref<nref; iref++)
+    {
+        TPZRefPatternTools::RefineDirectional(gmesh, matids);
+    }
+}
+
+
 void BuildBlueRedElements(TPZGeoMesh *gmesh, std::set<int64_t> &blue, std::set<int64_t> &red) {
     int64_t nel = gmesh->NElements();
+    int dim = gmesh->Dimension();
     std::set<TPZGeoEl *> cutelements;
     for(int64_t el = 0; el<nel; el++) {
         TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->HasSubElement()) continue;
         if(gel->MaterialId() == cutmat) {
             cutelements.insert(gel);
             TPZGeoElSide gelside(gel);
@@ -169,13 +217,34 @@ void BuildBlueRedElements(TPZGeoMesh *gmesh, std::set<int64_t> &blue, std::set<i
                 int64_t neighindex = neighbour.Element()->Index();
                 if(neighbour.Element()->MaterialId() == volmat)
                 {
-                    TPZTransform<REAL> tr(1);
-                    gelside.SideTransform3(neighbour, tr);
-                    if(tr.Mult()(0,0) > 0.) {
+                    int neighorient = 1;
+                    {
+                        TPZGeoEl *gel = neighbour.Element();
+                        TPZManVector<REAL,3> center(dim,0.);
+                        gel->CenterPoint(gel->NSides()-1,center);
+                        TPZFNMatrix<9,REAL> gradx(3,dim);
+                        gel->GradX(center, gradx);
+                        REAL z = gradx(0,0)*gradx(1,1)-gradx(1,0)*gradx(0,1);
+                        if(z < 0.) {
+                            neighorient = -1;
+                        }
+                    }
+                    bool counterclockwise = neighbour.IsNeighbourCounterClockWise(gelside);
+                    if(neighorient == -1) counterclockwise = !counterclockwise;
+                    if(counterclockwise) {
                         blue.insert(neighindex);
-                    } else {
+                    }
+                    else {
                         red.insert(neighindex);
                     }
+
+                    // TPZTransform<REAL> tr(1);
+                    // gelside.SideTransform3(neighbour, tr);
+                    // if(tr.Mult()(0,0) > 0.) {
+                    //     blue.insert(neighindex);
+                    // } else {
+                    //     red.insert(neighindex);
+                    // }
                     nfound++;
                 }
                 neighbour = neighbour.Neighbour();
@@ -184,7 +253,6 @@ void BuildBlueRedElements(TPZGeoMesh *gmesh, std::set<int64_t> &blue, std::set<i
         }
     }
     // loop over the dim-1 sides of the cut elements
-    int dim = gmesh->Dimension();
     for(auto gelcut : cutelements) {
         for(int side = gelcut->FirstSide(dim-2); side < gelcut->FirstSide(dim-1); side++) {
             TPZGeoElSide gelside(gelcut,side);
@@ -231,6 +299,7 @@ void BuildBlueRedElements(TPZGeoMesh *gmesh, std::set<int64_t> &blue, std::set<i
                 if(change == false) {
                     for(auto neighbour = gelside.Neighbour(); neighbour != gelside; neighbour++) {
                         int64_t neighindex = neighbour.Element()->Index();
+                        if(neighbour.Element()->HasSubElement()) continue;
                         if(blue.find(neighindex) == blue.end() && red.find(neighindex) == red.end()) {
                             DebugStop();
                         }
@@ -249,9 +318,34 @@ void BuildBlueRedElements(TPZGeoMesh *gmesh, std::set<int64_t> &blue, std::set<i
             if(!gmesh->Element(el)->HasSubElement()) color[el] = -1;
         }
         std::ofstream out("color.vtk");
-        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out, color);
+        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out, color,true);
     }
 }
+
+#include "pzvec_extras.h"
+/// @brief Choose the elements to be enriched based on their distance to the fracture
+/// @param gmesh geometric mesh that contains the elements
+/// @param radius distance from the fracture edge
+/// @param enrichedelements elements to be enriched
+void ElementsToEnrich(TPZGeoMesh *gmesh, TPZVec<REAL> &fracend, REAL radius, std::set<int64_t> &enrichedelements) {
+    int64_t nel = gmesh->NElements();
+    for(int64_t el = 0; el<nel; el++) {
+        TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->HasSubElement()) continue;
+        if(gel->Dimension() != gmesh->Dimension()) continue;
+        TPZManVector<REAL,3> center(gel->Dimension(),0.);
+        gel->CenterPoint(gel->NSides()-1,center);
+        TPZManVector<REAL,3> xcenter(3,0.);
+        gel->X(center,xcenter);
+        REAL dist = Norm(xcenter-fracend);
+        if(dist < radius) {
+            enrichedelements.insert(el);
+        }
+    }
+}
+
+
+
 /// @brief Create a computational mesh with H1 elements
 TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
 {
@@ -295,6 +389,40 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
 #include "pzshapequad.h"
 #include "pzshapetriang.h"
 
+void CreateGFemCompElements(TPZGFemCompMesh *cmesh, std::set<int64_t> &elements, GFemcolors color){
+    TPZGeoMesh *gmesh = cmesh->Reference();
+    for(auto el : elements) {
+        TPZGeoEl *gel = gmesh->Element(el);
+        if(gel->HasSubElement()) continue;
+        int matid = gel->MaterialId();
+        if(!cmesh->FindMaterial(matid)) continue;
+        if(gel->Reference()) continue;
+        switch(gel->Type())
+        {
+            case EOned:
+            {
+                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeLinear >(*cmesh, gel,color);
+            }
+            break;
+            case ETriangle:
+            {
+                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeTriang >(*cmesh, gel, color);
+            }
+            break;
+            case EQuadrilateral:
+            {
+                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeQuad >(*cmesh, gel, color);
+            }
+            break;
+            default:
+                DebugStop();
+        }
+    }
+}
+
+
+#include "TPZFrac2d.h"
+
 /// @brief Create a computational mesh with L2 elements
  TPZGFemCompMesh *CreateGFemCompMesh(TPZGeoMesh *gmesh)
  {
@@ -311,77 +439,16 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
 
     std::set<int64_t> blue, red;
     BuildBlueRedElements(gmesh, blue, red);
-    for(auto el : blue) {
-        TPZGeoEl *gel = gmesh->Element(el);
-        if(gel->HasSubElement()) continue;
-        int matid = gel->MaterialId();
-        if(!cmesh->FindMaterial(matid)) continue;
-        switch(gel->Type())
-        {
-            case EOned:
-            {
-                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeLinear >(*cmesh, gel);
-                cel->SetColor(Black);
-            }
-            break;
-            case ETriangle:
-            {
-                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeTriang >(*cmesh, gel);
-                cel->SetColor(Black);
-            }
-            break;
-            case EQuadrilateral:
-            {
-                auto *cel = new TPZGFemCompElH1< pzshape::TPZShapeQuad >(*cmesh, gel);
-                cel->SetColor(Black);
-            }
-            break;
-            default:
-                DebugStop();
-        }
-    }
-    // identify the connect that need to be active
-    {
-        int64_t nel = gmesh->NElements();
-        for(int64_t el = 0; el<nel; el++) {
-            TPZGeoEl *gel = gmesh->Element(el);
-            if(gel->HasSubElement()) continue;
-            if(gel->MaterialId() == cutmat) {
-                int nsides = gel->NSides();
-                for(int is = 0; is<nsides; is++) {
-                    TPZGeoElSide gelside(gel,is);
-                    if(gelside.HasNeighbour(fracedge)) continue;
-                    TPZGeoElSide neighbour = gelside.Neighbour();
-                    for(;neighbour  != gelside; neighbour++)
-                    {
-                        TPZGeoEl *neighgel = neighbour.Element();
-                        if(!neighgel->Reference()) continue;
-                        TPZCompEl *cel = neighbour.Element()->Reference();
-                        if(!cel) DebugStop();
-                        TPZInterpolatedElement *intel = dynamic_cast<TPZInterpolatedElement *>(cel);
-                        int64_t cindex = intel->ConnectIndex(neighbour.Side());
-                        if(cmesh->fShapeFunctionMap.find(cindex) == cmesh->fShapeFunctionMap.end())
-                        {
-                            cmesh->fShapeFunctionMap[cindex] = BlackWhite;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // set all other connects to inactive
-    {
-        int64_t nconnects = cmesh->NConnects();
-        for(int64_t ic=0; ic<nconnects; ic++)
-        {
-            if(cmesh->fShapeFunctionMap.find(ic) == cmesh->fShapeFunctionMap.end())
-            {
-                cmesh->ConnectVec()[ic].SetCondensed(true);
-            }
-        }
-    }
+    CreateGFemCompElements(cmesh, blue, Black);
+    CreateGFemCompElements(cmesh, red, White);
+    TPZManVector<REAL> fracend(3,0.);
+    FractureEnds(gmesh,fracend);
+    std::set<int64_t> enrichedelements;
+    ElementsToEnrich(gmesh, fracend, edgelength*3, enrichedelements);
+    CreateGFemCompElements(cmesh, enrichedelements, Grey);
+    cmesh->DrawElementColors("GFemColor.vtk");
     cmesh->ExpandSolution();
-    cmesh->IdentifyActiveConnects();
+    cmesh->InitializeShapeFunctionMap();
     {
         std::ofstream out("cmeshGFem.txt");
         cmesh->Print(out);
@@ -585,7 +652,8 @@ void InsertMaterialObjectsElasticity2D(TPZCompMesh *cmesh_m){
     std::set<int> materialIDs;
     STATE E = 100., nu = 0.3;
     STATE fx = 0., fy = 0.;
-    TPZElasticity2D *material = new TPZElasticity2D(volmat,E,nu,fx,fy);
+    int planestress = 1;
+    TPZElasticity2D *material = new TPZElasticity2D(volmat,E,nu,fx,fy,planestress);
     //  material->SetBigNumber(10e8);
      cmesh_m->InsertMaterialObject(material);
      materialIDs.insert(volmat);
@@ -613,6 +681,13 @@ void InsertMaterialObjectsElasticity2D(TPZCompMesh *cmesh_m){
     auto bnd4 = material->CreateBC(material, BCb, 2, val1, val2);
     cmesh_m->InsertMaterialObject(bnd4);
 
+    TPZGFemCompMesh *gfem = dynamic_cast<TPZGFemCompMesh *>(cmesh_m);
+    if(gfem) {
+        TPZManVector<REAL,3> fracend(3,0.),fracdir(3,0.);
+        FractureEnds(cmesh_m->Reference(),fracend);
+        fracdir[0] = 1.;
+        gfem->fFrac.SetFracData(fracend,fracdir,nu,planestress);
+    }
 }
 
 #include "TPZGFemElasticity2D.h"
