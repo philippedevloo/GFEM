@@ -86,7 +86,7 @@ void TPZGFemCompMesh::GetColorMap(std::map<int64_t,GFemcolors> &colormap) {
         }
         TPZGeoEl *gel = cel->Reference();
         auto elt = gel->Type();
-        GFemcolors color = None;
+        GFemcolors color = Nocolor;
         switch(elt) {
             case EPoint:
                 DebugStop();
@@ -143,7 +143,7 @@ void TPZGFemCompMesh::GetColorMap(std::map<int64_t,GFemcolors> &colormap) {
             numwhite++;
         } else if(color == Grey) {
             numgrey++;
-        } else if(color == None) {
+        } else if(color == Nocolor) {
             DebugStop();
         }
     }
@@ -177,7 +177,7 @@ void TPZGFemCompMesh::InitializeShapeFunctionMap() {
             continue;
         }
         TPZGeoEl *gel = cel->Reference();
-        int nsides = gel->NSides();
+        int nsides = gel->NCornerNodes();
         for (int is = 0; is < nsides; is++) {
             // colors of all connected elements
             std::set<GFemcolors> colors = {colormap[cel->Index()]};
@@ -218,6 +218,56 @@ void TPZGFemCompMesh::InitializeShapeFunctionMap() {
             } else {
                 fShapeFunctionMap[cindex] = fFrac.DeslocFunction();
                 connectvalue[cindex] = 2;
+            }
+        }
+    }
+    // add the internal connects for elements neighbouring the fracture element
+    {
+        extern int cutmat;
+        extern int fracedge;
+        int64_t nel = gmesh->NElements();
+        for (int64_t el = 0; el < nel; el++) {
+            TPZGeoEl *gel = gmesh->Element(el);
+            if (!gel) {
+                continue;
+            }
+            if(gel->HasSubElement()) {
+                continue;
+            }
+            if(gel->MaterialId() != cutmat) {
+                continue;
+            }
+            int nsides = gel->NSides();
+            int ncorners = gel->NCornerNodes();
+            for (int is = ncorners; is < nsides; is++) {
+                TPZGeoElSide gelside(gel, is);
+                if(gelside.HasNeighbour(fracedge)) {
+                    continue;
+                }
+                // colors of all connected elements
+                std::set<GFemcolors> colors = {colormap[gel->Index()]};
+                TPZStack<TPZGeoElSide> equal;
+                gelside.AllNeighbours(equal);
+                int neq = equal.size();
+                for(auto neigh : equal) {
+                    if(neigh.Element()->HasSubElement()) {
+                        continue;
+                    }
+                    int neighmatid = neigh.Element()->MaterialId();
+                    if(matids.find(neighmatid) == matids.end()) {
+                        continue;
+                    }
+                    TPZCompEl *neighcel = neigh.Element()->Reference();
+                    TPZConnect &c = neighcel->Connect(neigh.Side());
+                    if(c.NShape()*c.NState() == 0) {
+                        break;
+                    }
+                    int64_t neighconnectindex = neighcel->ConnectIndex(neigh.Side());
+                    if(fShapeFunctionMap.find(neighconnectindex) != fShapeFunctionMap.end()) {
+                        break;
+                    }
+                    fShapeFunctionMap[neighconnectindex] = BlackWhite;
+                }
             }
         }
     }

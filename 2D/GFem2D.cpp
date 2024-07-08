@@ -70,8 +70,15 @@ TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh);
 /// @brief Create a computational mesh with GFem elements
 TPZGFemCompMesh *CreateGFemCompMesh(TPZGeoMesh *gmesh);
 
+/// @brief Create an H1 mirror mesh from the GFem mesh
+TPZCompMesh *CreateH1MirrorMesh(TPZGFemCompMesh *cmeshGFem);
+
+/// @brief Assemble the equations and compute the connect restraints
+void ComputeConnectRestraints(TPZMultiphysicsCompMesh *cmesh);
+
 /// @brief Create the computational "multiphysics" mesh with only HDiv elements
-TPZMultiphysicsCompMesh *CreateMultiphysicsMesh(TPZCompMesh *cmeshH1, TPZGFemCompMesh *cmeshGFem);
+TPZMultiphysicsCompMesh *CreateMultiphysicsMesh(TPZCompMesh *cmeshH1, TPZGFemCompMesh *cmeshGFem,
+    TPZCompMesh *cmeshH1Mirror = nullptr);
 
 /// @brief Simulate the NACA profile using H1 approximation
 void Simulate(TPZCompMesh *cmesh, std::string name);
@@ -92,7 +99,7 @@ void InsertMaterialObjectsElasticity2D(TPZCompMesh *cmesh);
 void InsertMaterialObjectsElasticity2DMF(TPZMultiphysicsCompMesh *cmesh);
 
 /// @brief Insert material objects int the multiphysics mesh
-void InsertMaterialObjectsDaryMF(TPZMultiphysicsCompMesh *cmesh_m);
+void InsertMaterialObjectsDarcy2DMF(TPZMultiphysicsCompMesh *cmesh_m);
 
 int volmat = 1;
 int BCb = 2;
@@ -102,6 +109,11 @@ int BCl = 5;
 int cutmat = 6;
 int fracedge = 7;
 REAL edgelength = 0.1;
+// Darcy = darcy simulation with GFem
+// DarcyNoFrac = darcy simulation using multiphysics but no gfem elements
+// DarcyDiscontinuous = darcy simulation with H1 discontinuous elements
+enum simultype {Darcy,Elast,DarcyNofrac,ElastNoFrac,DarcyOrthogonal};
+simultype simtype = DarcyOrthogonal;
 
 int main() {
 
@@ -140,11 +152,58 @@ int main() {
     int defaultporder = 1;
     int64_t nel = gmesh->NElements();
     auto cmeshH1 = CreateH1CompMesh(gmesh);
-    Simulate(cmeshH1,"H1");
+    std::string plotfile = "H1";
+    switch (simtype) {
+        case Darcy:
+        case DarcyNofrac:
+        case DarcyOrthogonal:
+            plotfile += "_Darcy";
+            break;
+        case Elast:
+        case ElastNoFrac:
+            plotfile += "_Elast";
+            break;
+    }
+    Simulate(cmeshH1,plotfile);
     auto cmeshGFem = CreateGFemCompMesh(gmesh);
-    auto cmesh_m = CreateMultiphysicsMesh(cmeshH1,cmeshGFem);
-    Simulate(cmesh_m,"GFem");
-    CleanUp(cmesh_m);
+    if(simtype != DarcyOrthogonal) {
+        auto cmesh_m = CreateMultiphysicsMesh(cmeshH1,cmeshGFem);
+        plotfile = "GFem";
+        switch (simtype) {
+            case Darcy:
+            case DarcyNofrac:
+                plotfile += "_Darcy";
+                break;
+            case Elast:
+            case ElastNoFrac:
+                plotfile += "_Elast";
+                break;
+            case DarcyOrthogonal:
+                DebugStop();
+                break;
+        }
+        Simulate(cmesh_m,plotfile);
+        CleanUp(cmesh_m);
+
+    } else {
+        auto cmeshH1Mirror = CreateH1MirrorMesh(cmeshGFem);
+        auto cmesh_m = CreateMultiphysicsMesh(cmeshH1,cmeshGFem,cmeshH1Mirror);
+        plotfile = "GFem";
+        switch (simtype) {
+            case Darcy:
+            case DarcyNofrac:
+            case Elast:
+            case ElastNoFrac:
+                DebugStop();
+                break;
+            case DarcyOrthogonal:
+                plotfile += "_DarcyOrthogonal";
+                break;
+        }
+        ComputeConnectRestraints(cmesh_m);
+        Simulate(cmesh_m,plotfile);
+        CleanUp(cmesh_m);
+    }
     return 0;   
 }
 
@@ -350,7 +409,19 @@ void ElementsToEnrich(TPZGeoMesh *gmesh, TPZVec<REAL> &fracend, REAL radius, std
 TPZCompMesh *CreateH1CompMesh(TPZGeoMesh *gmesh)
 {
     TPZCompMesh *cmesh = new TPZCompMesh(gmesh);
-    InsertMaterialObjectsElasticity2D(cmesh);
+    switch(simtype) {
+        case Darcy:
+        case DarcyNofrac:
+            InsertMaterialObjectsDarcy(cmesh);
+            break;
+        case Elast:
+        case ElastNoFrac:
+            InsertMaterialObjectsElasticity2D(cmesh);
+            break;
+        case DarcyOrthogonal:
+            InsertMaterialObjectsDarcy(cmesh);
+            break;
+    }
     cmesh->ExpandSolution();
     cmesh->ComputeNodElCon();
     {
@@ -434,7 +505,24 @@ void CreateGFemCompElements(TPZGFemCompMesh *cmesh, std::set<int64_t> &elements,
     cmesh->SetDefaultOrder(1);
 
     cmesh->SetAllCreateFunctionsContinuous();
-    InsertMaterialObjectsElasticity2D(cmesh);
+    switch(simtype) {
+        case Darcy:
+            InsertMaterialObjectsDarcy(cmesh);
+            break;
+        case DarcyNofrac:
+            break;
+        case Elast:
+            InsertMaterialObjectsElasticity2D(cmesh);
+            break;
+        case ElastNoFrac:
+            break;
+        case DarcyOrthogonal:
+            InsertMaterialObjectsDarcy(cmesh);
+            break;
+    }
+    if(simtype == DarcyNofrac || simtype == ElastNoFrac) {
+        return cmesh;
+    }
      //o método ApproxSpace().CreateDisconnectedElements(true) é chamado para transformar os elementos em elementos discontinuos, criando assim um espaço L2 de aproximação.
 
     std::set<int64_t> blue, red;
@@ -456,10 +544,63 @@ void CreateGFemCompElements(TPZGFemCompMesh *cmesh, std::set<int64_t> &elements,
     return cmesh;
  }
 
+/// @brief Create an H1 mirror mesh from the GFem mesh
+TPZCompMesh *CreateH1MirrorMesh(TPZGFemCompMesh *cmeshGFem) {
+    TPZGeoMesh *gmesh = cmeshGFem->Reference();
+    TPZCompMesh *cmesh = new TPZCompMesh(gmesh);
+    switch(simtype) {
+        case Darcy:
+        case DarcyNofrac:
+            InsertMaterialObjectsDarcy(cmesh);
+            break;
+        case Elast:
+        case ElastNoFrac:
+            InsertMaterialObjectsElasticity2D(cmesh);
+            break;
+        case DarcyOrthogonal:
+            InsertMaterialObjectsDarcy(cmesh);
+            break;
+    }
+    cmesh->ExpandSolution();
+    cmesh->ComputeNodElCon();
+    {
+        std::fstream out("cmesh.txt");
+        cmesh->Print(out);
+    }
+
+    // cmesh->AutoBuild(matidsh1);
+    cmesh->ApproxSpace().SetAllCreateFunctionsContinuous();
+    std::set<int> matids = {volmat,BCb,BCt,BCr,BCl};
+    {
+        int64_t nel = cmeshGFem->NElements();
+        TPZStack<int64_t > gelstack;
+        for(int64_t el = 0; el<nel; el++) {
+            TPZCompEl *cel = cmeshGFem->Element(el);
+            TPZGeoEl *gel = cel->Reference();
+            if(gel->HasSubElement()) DebugStop();
+            int matid = gel->MaterialId();
+            if(matids.find(matid) != matids.end()) {
+                gelstack.Push(gel->Index());
+            } else {
+                DebugStop();
+            }
+        }
+        cmesh->ApproxSpace().BuildMesh(*cmesh, gelstack);
+    }
+    cmesh->ExpandSolution();
+    cmesh->ComputeNodElCon();
+    {
+        std::fstream out("cmesh.txt");
+        cmesh->Print(out);
+    }
+    cmesh->CleanUpUnconnectedNodes();
+    return cmesh;
+}
+
 #include "TPZGFemDarcyFlow.h"
 
 /// @brief Create a computational "multiphysics" mesh with only HDiv elements
- TPZMultiphysicsCompMesh *CreateMultiphysicsMesh(TPZCompMesh* cmeshH1,TPZGFemCompMesh* cmeshGFem){
+ TPZMultiphysicsCompMesh *CreateMultiphysicsMesh(TPZCompMesh* cmeshH1,TPZGFemCompMesh* cmeshGFem, TPZCompMesh *cmeshMirror){
 //
     auto gmesh = cmeshH1->Reference();
     TPZMultiphysicsCompMesh *cmesh_m = new TPZMultiphysicsCompMesh(gmesh);
@@ -470,16 +611,98 @@ void CreateGFemCompElements(TPZGFemCompMesh *cmesh, std::set<int64_t> &elements,
     cmesh_m->SetDefaultOrder(pord);
          
     cmesh_m->SetAllCreateFunctionsMultiphysicElem();
-    InsertMaterialObjectsElasticity2DMF(cmesh_m);
+    switch(simtype) {
+        case Darcy:
+        case DarcyNofrac:
+        case DarcyOrthogonal:
+            InsertMaterialObjectsDarcy2DMF(cmesh_m);
+            break;
+        case Elast:
+        case ElastNoFrac:
+            InsertMaterialObjectsElasticity2DMF(cmesh_m);
+            break;
+    }
 
-    TPZManVector<int, 2> active_approx_spaces(2, 1);
-    TPZManVector<TPZCompMesh *, 2> mesh_vec(2);
+    int nmeshes = 2;
+    if(cmeshMirror) nmeshes = 3;
+    TPZManVector<int, 3> active_approx_spaces(nmeshes, 1);
+    TPZManVector<TPZCompMesh *, 3> mesh_vec(nmeshes, 0);
     mesh_vec[0] = cmeshH1;
     mesh_vec[1] = cmeshGFem;
+    if(cmeshMirror) {
+        mesh_vec[1] = cmeshMirror;
+        mesh_vec[2] = cmeshGFem;
+    }
 
     cmesh_m->BuildMultiphysicsSpace(active_approx_spaces, mesh_vec);
+    cmesh_m->ExpandSolution();
+
+    {
+        std::cout << "Number of equations " << cmesh_m->NEquations() << std::endl;
+        int64_t neqsol = cmesh_m->Solution().Rows();
+        std::cout << "Solution size " << neqsol << std::endl;
+        int64_t neq = cmesh_m->NEquations();
+        TPZBlock &block = cmesh_m->Block();
+        int64_t ncon = block.NBlocks();
+        std::set<int64_t> allseq;
+        for(int64_t ic=0; ic<ncon; ic++){
+            TPZConnect &c = cmesh_m->ConnectVec()[ic];
+            int csz = c.NShape()*c.NState();
+            int64_t ib = c.SequenceNumber();
+            allseq.insert(ib);
+            int sz = block.Size(ib);
+            bool cactive = true;
+            if(c.HasDependency() || c.IsCondensed()) cactive = false;
+            if(csz != sz) {
+                std::cout << "Connect " << ib << " size " << sz << " nshape " << c.NShape() << " nstate " << c.NState() << std::endl;
+                c.Print(*cmesh_m);
+                DebugStop();
+            }
+            int64_t firsteq = block.Position(ib);
+            if(cactive && firsteq+sz > neq) DebugStop();
+            if(firsteq+sz > neqsol) DebugStop();
+        }
+        if(allseq.size() != ncon) DebugStop();
+    }
+    if(nmeshes == 3) {
+        int64_t ncon0 = cmeshH1->NConnects();
+        int64_t ncon1 = cmeshMirror->NConnects();
+        for (int64_t ic = 0; ic < ncon1; ic++) {
+            TPZConnect &c = cmesh_m->ConnectVec()[ic+ncon0];
+            c.SetCondensed(true);
+        }
+    }
 
     cmesh_m->ExpandSolution();
+    cmesh_m->CleanUpUnconnectedNodes();
+    {
+        std::cout << "Number of equations " << cmesh_m->NEquations() << std::endl;
+        int64_t neqsol = cmesh_m->Solution().Rows();
+        std::cout << "Solution size " << neqsol << std::endl;
+        int64_t neq = cmesh_m->NEquations();
+        TPZBlock &block = cmesh_m->Block();
+        int64_t ncon = block.NBlocks();
+        std::set<int64_t> allseq;
+        for(int64_t ic=0; ic<ncon; ic++){
+            TPZConnect &c = cmesh_m->ConnectVec()[ic];
+            int csz = c.NShape()*c.NState();
+            int64_t ib = c.SequenceNumber();
+            allseq.insert(ib);
+            int sz = block.Size(ib);
+            bool cactive = true;
+            if(c.HasDependency() || c.IsCondensed()) cactive = false;
+            if(csz != sz) {
+                std::cout << "Connect " << ib << " size " << sz << " nshape " << c.NShape() << " nstate " << c.NState() << std::endl;
+                c.Print(*cmesh_m);
+                DebugStop();
+            }
+            int64_t firsteq = block.Position(ib);
+            if(cactive && firsteq+sz > neq) DebugStop();
+            if(firsteq+sz > neqsol) DebugStop();
+        }
+        if(allseq.size() != ncon) DebugStop();
+    }
+
     return cmesh_m;
  }
 
@@ -612,11 +835,20 @@ void InsertMaterialObjectsDarcy(TPZCompMesh *cmesh) {
     auto bnd4 = material->CreateBC(material, BCt, 0, val1, val2);
     cmesh->InsertMaterialObject(bnd4);
 
+    TPZGFemCompMesh *gfem = dynamic_cast<TPZGFemCompMesh *>(cmesh);
+    if(gfem) {
+        TPZManVector<REAL,3> fracend(3,0.),fracdir(3,0.);
+        FractureEnds(cmesh->Reference(),fracend);
+        fracdir[0] = 1.;
+        REAL nu = 0.3;
+        int planestress = 1;
+        gfem->fFrac.SetFracData(fracend,fracdir,nu,Scalar2d, planestress);
+    }
 
 }
 
 /// @brief Insert material objects int the multiphysics mesh
-void InsertMaterialObjectsDarcyMF(TPZMultiphysicsCompMesh *cmesh_m){
+void InsertMaterialObjectsDarcy2DMF(TPZMultiphysicsCompMesh *cmesh_m){
     int dim = cmesh_m->Dimension();
     std::set<int> materialIDs;
     TPZGFemDarcyFlow *material = new TPZGFemDarcyFlow(volmat,dim);
@@ -686,7 +918,7 @@ void InsertMaterialObjectsElasticity2D(TPZCompMesh *cmesh_m){
         TPZManVector<REAL,3> fracend(3,0.),fracdir(3,0.);
         FractureEnds(cmesh_m->Reference(),fracend);
         fracdir[0] = 1.;
-        gfem->fFrac.SetFracData(fracend,fracdir,nu,planestress);
+        gfem->fFrac.SetFracData(fracend,fracdir,nu,Vector2d, planestress);
     }
 }
 
@@ -727,3 +959,52 @@ void InsertMaterialObjectsElasticity2DMF(TPZMultiphysicsCompMesh *cmesh_m){
     cmesh_m->InsertMaterialObject(bnd4);
 }
 
+#include "TPZGFemOrthogonal.h"
+
+void ComputeConnectRestraints(TPZMultiphysicsCompMesh *cmesh_m)
+{
+    cmesh_m->CleanUpUnconnectedNodes();
+    {
+        std::cout << "Number of equations " << cmesh_m->NEquations() << std::endl;
+        int64_t neqsol = cmesh_m->Solution().Rows();
+        std::cout << "Solution size " << neqsol << std::endl;
+        int64_t neq = cmesh_m->NEquations();
+        TPZBlock &block = cmesh_m->Block();
+        int64_t ncon = block.NBlocks();
+        std::set<int64_t> allseq;
+        for(int64_t ic=0; ic<ncon; ic++){
+            TPZConnect &c = cmesh_m->ConnectVec()[ic];
+            int csz = c.NShape()*c.NState();
+            int64_t ib = c.SequenceNumber();
+            allseq.insert(ib);
+            int sz = block.Size(ib);
+            bool cactive = true;
+            if(c.HasDependency() || c.IsCondensed()) cactive = false;
+            if(csz != sz) {
+                std::cout << "Connect " << ib << " size " << sz << " nshape " << c.NShape() << " nstate " << c.NState() << std::endl;
+                c.Print(*cmesh_m);
+                DebugStop();
+            }
+            int64_t firsteq = block.Position(ib);
+            if(cactive && firsteq+sz > neq) DebugStop();
+            if(firsteq+sz > neqsol) DebugStop();
+        }
+        if(allseq.size() != ncon) DebugStop();
+    }
+    TPZLinearAnalysis an(cmesh_m,RenumType::ENone);
+    // TPZSkylineStructMatrix<STATE> strmat(cmeshH1);
+    TPZSSpStructMatrix<STATE> strmat(cmesh_m);
+    an.SetStructuralMatrix(strmat);
+    TPZStepSolver<STATE> step;
+    step.SetDirect(ELDLt);
+    an.SetSolver(step);
+    an.Assemble();
+    TPZMatrixSolver<STATE> &matsolver = an.MatrixSolver<STATE>();
+    TPZMatrix<STATE> *global_mat = matsolver.Matrix().operator->();
+    TPZGFemOrthogonal ortho(cmesh_m,global_mat);
+    ortho.BuildNodePatches();
+    ortho.OrthogonalizeConnects();
+    global_mat->Zero();
+    an.Assemble();
+    ortho.VerifyOrthogonality();
+}

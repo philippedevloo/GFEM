@@ -108,11 +108,15 @@ int BCb = 3;//PressOut
 int middle = 10;//Middle
 int fracedge = 12;//Fracture edge
 int Hole = 15;//Hole
+int cutmat = Hole;
 int noslip = 4;
 int outer = 5;
 int pointmat1 = -1;
 int pointmat2 = -2;
 int pointmat3 = -3;
+// Darcy = darcy simulation with GFem
+// DarcyNoFrac = darcy simulation using multiphysics but no gfem elements
+// DarcyDiscontinuous = darcy simulation with H1 discontinuous elements
 enum simultype {Darcy,Elast,DarcyNofrac,ElastNoFrac,DarcyDiscontinuous,ElastDiscontinuous};
 simultype simtype = Elast;
 
