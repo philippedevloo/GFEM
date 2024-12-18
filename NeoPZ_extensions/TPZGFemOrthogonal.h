@@ -40,6 +40,12 @@ public:
     // Verify is the equations are orthogonalized
     void VerifyOrthogonality();
 
+    // return the connect index with largest eigenvalue ratio
+    int64_t LargestEigenvalueRatio();
+
+    // represent the orthogonalization graphically
+    void DrawOrthogonalization(int gfemconnectindex, const std::string &filename);
+private:
     // Initialize the data structure fNodePatches
     void BuildNodePatches();
 

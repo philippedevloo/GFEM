@@ -8,8 +8,10 @@
 #include "TPZYSMPMatrix.h"
 #include "TPZRenumbering.h"
 #include "TPZGuiInterface.h"
-
+#include "pzcmesh.h"
+#include "TPZSSparseMatRed.h"
 #include "TPZTimer.h"
+#include "pzstepsolver.h"
 
 #ifdef USING_EIGEN
 #include "TPZEigenSparseMatrix.h"
@@ -28,14 +30,57 @@ static TPZLogger logger("pz.StrMatrix");
 using namespace std;
 
 template<class TVar, class TPar>
+TPZSSpMatRedStructMatrix<TVar,TPar>::TPZSSpMatRedStructMatrix(TPZCompMesh *mesh) : TPZStructMatrixT<TVar>(mesh) {
+    fDim = mesh->NEquations();
+    // no equations are condensed
+    fDim0 = 0;
+}
+
+template<class TVar, class TPar>
+TPZSSpMatRedStructMatrix<TVar,TPar>::TPZSSpMatRedStructMatrix(TPZCompMesh *mesh, const std::set<int> &LagrangeLevels) : TPZStructMatrixT<TVar>(mesh), fLagrangeLevels(LagrangeLevels) {
+    fDim = mesh->NEquations();
+    fDim0 = 0;
+    Resequence();
+}
+
+/// @brief Create a structural matrix that will condense the first dim0 equations
+/// @param mesh computational mesh already reordered by connects
+/// @param dim0 number of equations that will be resolved by a direct solver
+template<class TVar, class TPar>
+TPZSSpMatRedStructMatrix<TVar,TPar>::TPZSSpMatRedStructMatrix(TPZCompMesh *mesh, int64_t dim0): TPZStructMatrixT<TVar>(mesh)
+{
+    fDim = mesh->NEquations();
+    fDim0 = dim0;
+}
+
+
+
+template<class TVar, class TPar>
 TPZStructMatrix * TPZSSpMatRedStructMatrix<TVar,TPar>::Clone(){
     return new TPZSSpMatRedStructMatrix(*this);
 }
 
+    /*! Creates solver matrix and assembles it alongside global rhs.
+    Avoid overriding it unless there are no other options*/
+template<class TVar, class TPar>
+TPZBaseMatrix *
+TPZSSpMatRedStructMatrix<TVar,TPar>::CreateAssemble(TPZBaseMatrix &rhs,
+                   TPZAutoPointer<TPZGuiInterface> guiInterface) {
+    auto result = TPar::CreateAssemble(rhs,guiInterface);
+     auto spMat = dynamic_cast<TPZSparseMatRed<TVar> *>(result);
+    if(!spMat) DebugStop();
+    TPZFMatrix<TVar> *rhsF = dynamic_cast<TPZFMatrix<TVar> *>(&rhs);
+    if(!(rhsF)) DebugStop();
+    spMat->SetF(*rhsF);
+    return result;
+}
+
 template<class TVar, class TPar>
 void TPZSSpMatRedStructMatrix<TVar,TPar>::EndCreateAssemble(TPZBaseMatrix * mat){
-    auto spMat = dynamic_cast<TPZFYsmpMatrix<TVar> *>(mat);
-    spMat->ComputeDiagonal();
+    auto spMat = dynamic_cast<TPZSparseMatRed<TVar> *>(mat);
+    if(!spMat) DebugStop();
+    spMat->SimetrizeMatRed();
+    spMat->SetReduced();
 }
 
 template<class TVar, class TPar>
@@ -50,9 +95,52 @@ TPZMatrix<TVar> * TPZSSpMatRedStructMatrix<TVar,TPar>::Create(){
     TPZVec<int64_t> elgraphindex;
     //    int nnodes = 0;
     this->fMesh->ComputeElGraph(elgraph,elgraphindex);
+    // this will also compute the number of reduced equations
     TPZMatrix<TVar> * mat = SetupMatrixData(elgraph,elgraphindex);
-    return mat;
+
+    TPZSparseMatRed<TVar> *sparsemat = new TPZSparseMatRed<TVar>(fDimReduced, fDim0Reduced);
+    sparsemat->AllocateSubMatrices(*mat);
+    sparsemat->InitializeSolver(ELDLt);
+    delete mat;
+    return sparsemat;
 }
+
+/// @brief return a reference to the K11 matrix
+template<class TVar, class TPar>
+TPZAutoPointer<TPZMatrix<TVar>>  TPZSSpMatRedStructMatrix<TVar,TPar>::CloneK11(TPZAutoPointer<TPZMatrix<TVar>> matrix) {
+    auto *sparsemat = dynamic_cast<TPZSparseMatRed<TVar> *>(matrix.operator->());
+    if (!sparsemat) {
+        DebugStop();
+    }
+    TPZSYsmpMatrix<TVar> * matK11 = dynamic_cast<TPZSYsmpMatrix<TVar> *>(&sparsemat->K11());
+    if (!matK11) {
+        DebugStop();
+    }
+#ifdef USING_MKL
+    TPZFYsmpMatrixPardiso<TVar> * mat = new TPZFYsmpMatrixPardiso<TVar>(*matK11);
+#elif USING_EIGEN
+    TPZEigenSparseMatrix<TVar> * mat = new TPZEigenSparseMatrix<TVar>(*matK11);
+#else
+    TPZFYsmpMatrix<TVar> *mat = new TPZFYsmpMatrix<TVar>(*matK11);
+    DebugStop();
+#endif
+
+    TPZAutoPointer<TPZMatrix<TVar>> K11(mat);
+    return K11;
+
+}
+
+/// @brief extract the reduced right hand side
+template<class TVar, class TPar>
+void TPZSSpMatRedStructMatrix<TVar,TPar>::ExtractF1(TPZAutoPointer<TPZMatrix<TVar>> matrix, TPZFMatrix<TVar> &F1){
+    auto *sparsemat = dynamic_cast<TPZSparseMatRed<TVar> *>(matrix.operator->());
+    if (!sparsemat) {
+        DebugStop();
+    }
+    sparsemat->F1Red(F1);
+}
+
+
 
 template<class TVar, class TPar>
 TPZMatrix<TVar> *
@@ -68,7 +156,12 @@ TPZSSpMatRedStructMatrix<TVar,TPar>::SetupMatrixData(TPZStack<int64_t> & elgraph
     TPZFYsmpMatrix<TVar> *mat = new TPZFYsmpMatrix<TVar>(neq,neq);
     DebugStop();
 #endif
-    
+    if(this->fEquationFilter.IsActive()) {
+        DebugStop();
+    } else {
+        fDimReduced = fDim;
+        fDim0Reduced = fDim0;
+    }
     /**Creates a element graph*/
     TPZRenumbering graph;
     graph.SetElementsNodes(elgraphindex.NElements() -1 ,
@@ -200,6 +293,77 @@ TPZSSpMatRedStructMatrix<TVar,TPar>::SetupMatrixData(TPZStack<int64_t> & elgraph
     mat->SetData(std::move(Eq),std::move(EqCol),std::move(EqValue));
     return mat;
 }
+
+/// resequence the equation as a function of the lagrange levels
+/// all connects with lagrange level included in the set will be ordered first
+template<class TVar, class TPar>
+void TPZSSpMatRedStructMatrix<TVar,TPar>::Resequence() {
+    TPZCompMesh *cmesh = this->fMesh;
+    cmesh->LoadReferences();
+    auto neqsTotal = cmesh->NEquations();
+  
+    int64_t dim00 = 0;
+    int64_t dim11 = 0;
+  
+    // loop over the connects and create two std::sets one to the "pressure" ones, representing the
+    // degrees of freedom to be condensed. The second set contains the "flux" connects, which will not be condensed
+    
+    int64_t seqNumP = 0;
+    cmesh->Block().Resequence();
+
+    // that is soo strange. Putting the sequence number according to connect index??
+    for (int icon = 0; icon < cmesh->NConnects(); icon++){
+        
+        TPZConnect &con = cmesh->ConnectVec()[icon];
+        int64_t seqNum = con.SequenceNumber();
+        if (con.IsCondensed()) continue;
+        if (seqNum < 0) continue;
+        int laglevel = con.LagrangeMultiplier();
+
+        if(fLagrangeLevels.find(laglevel) != fLagrangeLevels.end()) {
+            con.SetSequenceNumber(seqNumP);
+            //Em cada caso precisa atualizar o tamanho do bloco
+            int neq = con.NShape()*con.NState();
+            seqNumP++;
+            dim00 += neq;
+            seqNum=con.SequenceNumber();
+            cmesh->Block().Set(seqNum,neq);
+        }
+    }
+    
+    std::set<int64_t> auxConnects00, auxConnects11;
+    int64_t seqNumF = seqNumP;
+    
+    //Second - Set the sequence number to the flux variables - which will not be condensed
+    for (int icon = 0; icon < cmesh->NConnects(); icon++){
+        
+        TPZConnect &con = cmesh->ConnectVec()[icon];
+        int64_t seqNum = con.SequenceNumber();
+        if (con.IsCondensed()) continue;
+        if (seqNum < 0) continue;
+        
+        int laglevel = con.LagrangeMultiplier();
+
+        if(fLagrangeLevels.find(laglevel) == fLagrangeLevels.end()) {
+
+            con.SetSequenceNumber(seqNumF);
+            
+            //Em cada caso precisa atualizar o tamanho do bloco
+            int neq = con.NShape()*con.NState();
+            seqNumF++;
+            dim11 += neq;
+            seqNum=con.SequenceNumber();
+            cmesh->Block().Set(seqNum,neq);
+        }
+    }
+    cmesh->Block().Resequence();
+    cmesh->ExpandSolution();
+    
+    
+    fDim = dim00+dim11;
+    fDim0 = dim00;
+}
+
 
 template<class TVar, class TPar>
 int TPZSSpMatRedStructMatrix<TVar,TPar>::ClassId() const{

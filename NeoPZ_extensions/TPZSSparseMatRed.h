@@ -118,9 +118,9 @@ public:
     fF0IsComputed = directive;
   }
   
-  TPZSYsmpMatrix<TVar> &K00()
+  TPZAutoPointer<TPZSYsmpMatrix<TVar>> K00()
   {
-    return *fK00;
+    return fK00;
   }
   TPZFYsmpMatrix<TVar> &K01()
   {
@@ -156,7 +156,12 @@ public:
     return fDim1;
   }
   
+  /// @brief  Initialize a direct solver associated with the K00 matrix
+  /// @param dec decomposition type
+  void InitializeSolver(DecomposeType dec);
+
   void SetSolver(TPZAutoPointer<TPZMatrixSolver<TVar> > solver);
+
   TPZAutoPointer<TPZMatrixSolver<TVar> > Solver()
   {
     return fSolver;
@@ -206,7 +211,7 @@ public:
   
   void ReorderEquations(TPZCompMesh *cmesh, std::set<int> &LagLevels, int64_t &dim, int64_t &dim00);
   
-  void AllocateSubMatrices(TPZCompMesh *cmesh);
+  void AllocateSubMatrices(TPZMatrix<TVar> &mat);
   
   void SetK00IsNegativeDefinite(){
     fK00NegativeDefinite = true;
@@ -226,7 +231,10 @@ public:
 	void Write(TPZStream &buf, int withclassid) const override;
 	void Read(TPZStream &buf, void *context) override;
 protected:
-  int64_t Size() const override;
+  int64_t Size() const override {
+    DebugStop();
+    return -1;
+  }
 private:
 	
 	/**

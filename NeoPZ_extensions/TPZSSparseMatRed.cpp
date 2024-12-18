@@ -19,6 +19,9 @@ using namespace std;
 #include "TPZPersistenceManager.h"
 #include "TPZTimer.h"
 #include "TPZSYSMPMatrix.h"
+#ifdef USING_EIGEN
+#include "TPZEigenSparseMatrix.h"
+#endif
 
 #include <sstream>
 #include "pzlog.h"
@@ -44,6 +47,8 @@ TPZMatrix<TVar>( 0, 0 ), fK00(0), fK00Auto(), fK11(0,0),fK01(0,0),fK10(0,0),fF0(
   fF0IsComputed = false;
   fK00 = new TPZSYsmpMatrix<TVar>();
   fK00Auto = fK00;
+  this->SetSymmetry(SymProp::Sym);
+  
 }
 
 template<class TVar>
@@ -52,13 +57,23 @@ TPZRegisterClassId(&TPZSparseMatRed::ClassId),
 TPZMatrix<TVar>( dim,dim ), fK11(dim-dim00,dim-dim00), fK01(dim00,dim-dim00),
 fK10(dim-dim00,dim00), fF0(dim00,1,0.),fF1(dim-dim00,1,0.)
 {
-  fK00 = new TPZSYsmpMatrix<TVar>(dim00,dim00);
+#ifdef USING_MKL
+    TPZFYsmpMatrixPardiso<TVar> * mat = new TPZFYsmpMatrixPardiso<TVar>(dim00,dim00);
+#elif USING_EIGEN
+    TPZEigenSparseMatrix<TVar> * mat = new TPZEigenSparseMatrix<TVar>(dim00,dim00);
+#else
+    TPZFYsmpMatrix<TVar> *mat = new TPZFYsmpMatrix<TVar>(dim00,dim00);
+    DebugStop();
+#endif
+  fK00 = mat;
   fK00Auto = fK00;
   if(dim<dim00) TPZMatrix<TVar>::Error(__PRETTY_FUNCTION__,"dim k00> dim");
   fDim0=dim00;
   fDim1=dim-dim00;
   fF0IsComputed = false;
   fIsReduced = 0;
+  this->SetSymmetry(SymProp::Sym);
+
 }
 
 
@@ -82,6 +97,8 @@ TPZRegisterClassId(&TPZSparseMatRed::ClassId)
   fDim1=dim-dim00;
   fF0IsComputed = false;
   fIsReduced = 0;
+  this->SetSymmetry(SymProp::Sym);
+
 }
 
 template<class TVar>
@@ -194,6 +211,16 @@ void TPZSparseMatRed<TVar>::SetSolver(TPZAutoPointer<TPZMatrixSolver<TVar> > sol
   fSolver->SetMatrix(basemat);
   this->fSymProp = fK00->GetSymmetry();
 }
+
+  /// @brief  Initialize a direct solver associated with the K00 matrix
+  /// @param dec decomposition type
+template<class TVar>
+void TPZSparseMatRed<TVar>::InitializeSolver(DecomposeType dec) {
+  auto step = new TPZStepSolver<TVar>(fK00Auto);
+  step->SetDirect(dec);
+  fSolver = step;
+}
+
 
 
 
@@ -724,16 +751,15 @@ void TPZSparseMatRed<TVar>::ReorderEquations(TPZCompMesh *cmesh, std::set<int> &
 }
 
 template<class TVar>
-void TPZSparseMatRed<TVar>::AllocateSubMatrices(TPZCompMesh *cmesh) {
+void TPZSparseMatRed<TVar>::AllocateSubMatrices(TPZMatrix<TVar> &mat) {
   
   int64_t dim11 = fDim1;
   int64_t dim00 = fDim0;
   
-  //Aloca as submatrizes no formato esparso.
-  TPZSSpStructMatrix<STATE,TPZStructMatrixOR<STATE>> Stiffness(cmesh);
-  Stiffness.EquationFilter().Reset();
-  TPZSYsmpMatrix<REAL> *StiffK11 = dynamic_cast<TPZSYsmpMatrix<REAL> *>(Stiffness.Create());
-  
+  TPZSYsmpMatrix<TVar> *StiffK11 = dynamic_cast<TPZSYsmpMatrix<TVar> *>(&mat);
+  if(!StiffK11) {
+    DebugStop();
+  }
   //Fazer uma rotina para separar IA, JA e A de K01, K10 e K11;
   TPZVec<int64_t> IA_K00(dim00+1,0), IA_K01(dim00+1,0), IA_K10(dim11+1,0), IA_K11(dim11+1,0);
   
@@ -795,7 +821,6 @@ void TPZSparseMatRed<TVar>::AllocateSubMatrices(TPZCompMesh *cmesh) {
   fK01.SetData(IA_K01,JA_K01,A_K01);
   fK10.SetData(IA_K10,JA_K10,A_K10);
   fK11.SetData(IA_K11,auxK11,A_K11);
-  delete StiffK11;
 }
 
 template class TPZSparseMatRed<double>;

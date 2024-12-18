@@ -1002,9 +1002,10 @@ void ComputeConnectRestraints(TPZMultiphysicsCompMesh *cmesh_m)
     TPZMatrixSolver<STATE> &matsolver = an.MatrixSolver<STATE>();
     TPZMatrix<STATE> *global_mat = matsolver.Matrix().operator->();
     TPZGFemOrthogonal ortho(cmesh_m,global_mat);
-    ortho.BuildNodePatches();
     ortho.OrthogonalizeConnects();
     global_mat->Zero();
     an.Assemble();
     ortho.VerifyOrthogonality();
+    int64_t gfemconnectindex = ortho.LargestEigenvalueRatio();
+    ortho.DrawOrthogonalization(gfemconnectindex,"Ortho");
 }

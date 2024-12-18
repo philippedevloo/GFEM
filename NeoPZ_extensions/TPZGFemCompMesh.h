@@ -29,7 +29,7 @@ public:
         
     }
     // associate a general function with a connect index
-    std::map<int, GFemShapeFunctionType> fShapeFunctionMap;
+    std::map<int64_t, GFemShapeFunctionType> fShapeFunctionMap;
 
     // Objects that define the two dimensional fracture
     TPZFrac2d fFrac;

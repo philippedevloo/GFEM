@@ -82,6 +82,9 @@ TPZMultiphysicsCompMesh *CreateMultiphysicsMesh(TPZCompMesh *cmeshH1, TPZGFemCom
 /// @brief Simulate the NACA profile using H1 approximation
 void Simulate(TPZCompMesh *cmesh, std::string name);
 
+/// @brief Simulate using sparse matred as global matrix
+void SimulateMatRed(TPZMultiphysicsCompMesh *cmesh, std::string name);
+
 /// @brief print the results of the analysis
 void PrintResults(TPZCompMesh *cmesh, std::string plotfile);
 
@@ -201,7 +204,7 @@ int main() {
     } else if(simtype == Elast) {
         GFemName = "GFemElast";
     }
-    Simulate(cmesh_m,GFemName);
+    SimulateMatRed(cmesh_m,GFemName);
     CleanUp(cmesh_m);
     return 0;   
 }
@@ -954,6 +957,60 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
     an.Assemble();
 //  Solve the system of equations and save the solutions: phi_0 e phi_1 
     an.Solve();
+    if (1)
+    {
+        std::string plotfile = "cmesh"+name+".txt";
+        std::ofstream out(name);
+        cmesh->Print(out);
+    }
+    std::cout << "--------- PostProcess " << name << " ---------" << std::endl;
+    //printa na tela "--------- PostProcess ---------", indicando que a simulação está em processamento.
+    TPZMultiphysicsCompMesh *cmesh_m = dynamic_cast<TPZMultiphysicsCompMesh *>(cmesh);
+    PrintResults(cmesh,name);
+    //chama a função PrintResults para realizar o pós-processamento dos resultados. Essa função provavelmente gera saídas com os resultados da simulação.
+
+}
+
+#include "TPZSSpMatRedStructMatrix.h"
+#include "TPZSSparseMatRed.h"
+
+/// @brief Simulate the NACA profile using H1 approximation
+void SimulateMatRed(TPZMultiphysicsCompMesh *cmesh, std::string name)
+{
+
+    TPZCompMesh *cmesh0 = cmesh->MeshVector()[0];
+    int64_t dim0 = cmesh0->NEquations();
+    TPZLinearAnalysis an(cmesh,RenumType::ENone);
+    // TPZSkylineStructMatrix<STATE> strmat(cmesh);
+    // TPZSSpStructMatrix<STATE> strmat(cmesh);
+    TPZSSpMatRedStructMatrix<STATE> strmat(cmesh,dim0);
+    an.SetStructuralMatrix(strmat);
+    TPZStepSolver<STATE> step;
+    an.SetSolver(step);
+    an.Assemble();
+    TPZMatrixSolver<STATE> *matrixsolver = dynamic_cast<TPZMatrixSolver<STATE> *>(an.Solver());
+    TPZAutoPointer<TPZMatrix<STATE> > stiff = matrixsolver->Matrix();
+    auto K11 = strmat.CloneK11(stiff);
+    TPZStepSolver<STATE> K11Direct(K11);
+    K11Direct.SetDirect(ELDLt);
+    TPZStepSolver<STATE> step2(stiff);
+    step2.SetCG(20, K11Direct, 1.e-10, 0);
+    TPZFMatrix<STATE> locsol, locrhs;
+    strmat.ExtractF1(stiff,locrhs);
+    step2.Solve(locrhs,locsol);
+    TPZSparseMatRed<STATE> *sparse = dynamic_cast<TPZSparseMatRed<STATE> *>(stiff.operator->());
+    if(!sparse) {
+        DebugStop();
+    }
+    TPZFMatrix<STATE> sol;
+    sparse->UGlobal(locsol, sol);
+    an.Solution() = sol;
+    an.LoadSolution();
+    // extract the K11 matrix (make a copy in order to avoid pointer ownership problems)
+    // set the stepsolver to CG using the direct solver of the K11 matrix
+
+//  Solve the system of equations and save the solutions: phi_0 e phi_1 
+    //an.Solve();
     if (1)
     {
         std::string plotfile = "cmesh"+name+".txt";

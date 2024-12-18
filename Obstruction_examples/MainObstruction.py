@@ -20,7 +20,7 @@ from TPZNoObstruction import TPZNoObstruction
 #%% ****************** 
 #     JSON DATA
 #   ******************
-file_name = "Reference"
+file_name = "PennyShape"
 
 mm = 1e-3
 cm = mm*10

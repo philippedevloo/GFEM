@@ -64,7 +64,7 @@ void TPZFrac2d::Desloc(const TPZVec<REAL> &x, GFemcolors color, TPZFMatrix<STATE
             gradphi(0,0) = gradphixy(0,0);
             gradphi(1,0) = gradphixy(0,1);
             gradphi(3,0) = gradphixy(1,0);
-            gradphi(4,1) = gradphixy(1,1);
+            gradphi(4,0) = gradphixy(1,1);
         }
         {
             REAL u0,u1,gradu0[2],gradu1[2];

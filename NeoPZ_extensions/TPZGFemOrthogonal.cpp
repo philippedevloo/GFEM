@@ -273,6 +273,7 @@ void TPZGFemOrthogonal::ComputePatchMatrix(TNodePatch &nodepatch, TPZFMatrix<STA
 // Orthogonalize Connects
 void TPZGFemOrthogonal::OrthogonalizeConnects()
 {
+    if(fNodePatches.size() == 0) BuildNodePatches();
     int64_t neq_total = fMultiphysicsCompMesh->NEquations();
     // loop over the node patches
     for (auto &nodepatch : fNodePatches) {
@@ -461,3 +462,95 @@ void TPZGFemOrthogonal::VerifyOrthogonality()
         }
     }
 }
+
+// return the connect index with largest eigenvalue ratio
+int64_t TPZGFemOrthogonal::LargestEigenvalueRatio() {
+    REAL maxratio = 0.;
+    int64_t maxconnect = -1;
+    for (auto &nodepatch : fNodePatches) {
+        REAL ratio = nodepatch.fOrthogonalizedSmallestEigenvalue/nodepatch.fOriginalSmallestEigenvalue;
+        if(ratio > maxratio) {
+            maxratio = ratio;
+            maxconnect = nodepatch.fGFemConnectIndex;
+        }
+    }
+    std::cout << "Max ratio " << maxratio << " connect " << maxconnect << std::endl;
+    return maxconnect;
+}
+
+#include "TPZVTKGenerator.h"
+
+// represent the orthogonalization graphically
+void TPZGFemOrthogonal::DrawOrthogonalization(int gfemconnectindex, const std::string &filename){
+    // Draw the shape function
+    TPZVec<TPZCompMesh *> &meshvec = fMultiphysicsCompMesh->MeshVector();
+    TPZGFemCompMesh *gfemmesh = dynamic_cast<TPZGFemCompMesh *>(meshvec[2]);
+    int firstconnectgfem = meshvec[0]->NConnects()+meshvec[1]->NConnects();
+    for(int i=0; i<meshvec.size(); i++) {
+        TPZCompMesh *cmesh = meshvec[i];
+        TPZFMatrix<STATE> &sol = cmesh->Solution();
+        sol.Zero();
+    }
+    TPZFMatrix<STATE> &sol = fMultiphysicsCompMesh->Solution();
+    sol.Zero();
+    {
+        int64_t gfemclocindex = gfemconnectindex-firstconnectgfem;
+        TPZConnect &cgfem = gfemmesh->ConnectVec()[gfemclocindex];
+        int64_t seqnum = cgfem.SequenceNumber();
+        int64_t pos = gfemmesh->Block().Position(seqnum);
+        TPZFMatrix<STATE> &sol = gfemmesh->Solution();
+        sol(pos,0) = 1.;
+        TPZStack<std::string> fields;
+        fields.Push("Pressure");
+        int vtkRes = 3;
+        std::string plotfile = filename + "_gfem";
+        auto vtk = TPZVTKGenerator(gfemmesh, fields, plotfile, vtkRes);    
+        vtk.SetNThreads(0);
+        vtk.Do();
+    }
+    {
+        TPZConnect &cgfem = fMultiphysicsCompMesh->ConnectVec()[gfemconnectindex];
+        int64_t seqnum = cgfem.SequenceNumber();
+        int64_t pos = fMultiphysicsCompMesh->Block().Position(seqnum);
+        TPZFMatrix<STATE> &sol = fMultiphysicsCompMesh->Solution();
+        sol(pos,0) = 1.;
+        fMultiphysicsCompMesh->LoadSolution(sol);
+        fMultiphysicsCompMesh->LoadSolutionFromMultiPhysics();
+        int64_t gfemclocindex = gfemconnectindex-firstconnectgfem;
+        TPZConnect &cgfemloc = gfemmesh->ConnectVec()[gfemclocindex];
+        int64_t seqnumloc = cgfemloc.SequenceNumber();
+        int64_t posloc = gfemmesh->Block().Position(seqnumloc);
+        TPZFMatrix<STATE> &solloc = gfemmesh->Solution();
+        solloc(posloc,0) = 1.;
+        TPZStack<std::string> fields;
+        fields.Push("Pressure");
+        int vtkRes = 3;
+        std::string plotfile = filename + "_gfemorth";
+        auto vtk = TPZVTKGenerator(fMultiphysicsCompMesh, fields, plotfile, vtkRes);    
+        vtk.SetNThreads(0);
+        vtk.Do();
+    }
+    {
+        TPZConnect &cgfem = fMultiphysicsCompMesh->ConnectVec()[gfemconnectindex];
+        int64_t seqnum = cgfem.SequenceNumber();
+        int64_t pos = fMultiphysicsCompMesh->Block().Position(seqnum);
+        TPZFMatrix<STATE> &sol = fMultiphysicsCompMesh->Solution();
+        sol(pos,0) = 1.;
+        fMultiphysicsCompMesh->LoadSolution(sol);
+        fMultiphysicsCompMesh->LoadSolutionFromMultiPhysics();
+        int64_t gfemclocindex = gfemconnectindex-firstconnectgfem;
+        TPZConnect &cgfemloc = gfemmesh->ConnectVec()[gfemclocindex];
+        int64_t seqnumloc = cgfemloc.SequenceNumber();
+        int64_t posloc = gfemmesh->Block().Position(seqnumloc);
+        TPZFMatrix<STATE> &solloc = gfemmesh->Solution();
+        solloc(posloc,0) = 0.;
+        TPZStack<std::string> fields;
+        fields.Push("Pressure");
+        int vtkRes = 3;
+        std::string plotfile = filename + "_gfemcorrection";
+        auto vtk = TPZVTKGenerator(fMultiphysicsCompMesh, fields, plotfile, vtkRes);    
+        vtk.SetNThreads(0);
+        vtk.Do();
+    }
+}
+
