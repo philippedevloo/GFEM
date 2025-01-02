@@ -15,7 +15,7 @@
 #include <TPZNullMaterial.h>
 #include <TPZMultiphysicsCompMesh.h>
 #include "TPZSSpStructMatrix.h"
-#include "TPZSYSMPMatrix.h"
+//#include "TPZSYSMPMatrix.h"
 #include "pzskylstrmatrix.h"
 #include "TPZRefPatternDataBase.h"
 #include "TPZVTKGeoMesh.h"
@@ -116,7 +116,6 @@ enum simultype {Darcy,Elast,DarcyNofrac,ElastNoFrac,DarcyOrthogonal};
 simultype simtype = DarcyOrthogonal;
 
 int main() {
-
     gRefDBase.InitializeRefPatterns(3);
 
 #ifdef PZ_LOG
@@ -711,7 +710,7 @@ void Simulate(TPZCompMesh *cmesh, std::string name)
 {
 
     TPZLinearAnalysis an(cmesh,RenumType::EMetis);
-    // TPZSkylineStructMatrix<STATE> strmat(cmeshH1);
+    //TPZSkylineStructMatrix<STATE> strmat(cmesh);
     TPZSSpStructMatrix<STATE> strmat(cmesh);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> step;
@@ -992,7 +991,7 @@ void ComputeConnectRestraints(TPZMultiphysicsCompMesh *cmesh_m)
         if(allseq.size() != ncon) DebugStop();
     }
     TPZLinearAnalysis an(cmesh_m,RenumType::ENone);
-    // TPZSkylineStructMatrix<STATE> strmat(cmeshH1);
+    //TPZSkylineStructMatrix<STATE> strmat(cmesh_m);
     TPZSSpStructMatrix<STATE> strmat(cmesh_m);
     an.SetStructuralMatrix(strmat);
     TPZStepSolver<STATE> step;

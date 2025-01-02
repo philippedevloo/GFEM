@@ -10,7 +10,10 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 include(cmake/StandardProjectSettings.cmake)
 
 # Enables NeoPZ library
-find_package(NeoPZ REQUIRED)
+
+find_package(NeoPZ REQUIRED HINTS ${CMAKE_SOURCE_DIR}/../neopz_install/ ${CMAKE_SOURCE_DIR}/neopz_install/)
+
+find_package(Eigen3 REQUIRED)
 
 # Mac OS X specific code
 if (APPLE)
@@ -37,11 +40,13 @@ if (ENABLE_ALL_WARNINGS)
     set(CMAKE_CXX_FLAGS "")
 endif ()
 
-include_directories(/Users/philippedevloo/GitHub/GFemResearch/neopz_GFEM/build-cmake/_deps/eigen-src)
+#include_directories(/Users/philippedevloo/GitHub/GFemResearch/neopz_GFEM/build-cmake/_deps/eigen-src)
 include_directories(${CMAKE_SOURCE_DIR}/NeoPZ_extensions)
 
 # Creates GFEMLib with common extension classes
 add_subdirectory(NeoPZ_extensions)
+
+
 
 # Creates ErrorEstimationLib with common error estimation file
 add_subdirectory(2D)
