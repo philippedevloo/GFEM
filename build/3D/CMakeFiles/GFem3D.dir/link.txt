@@ -1,1 +1,0 @@
-/usr/bin/g++ -g CMakeFiles/GFem3D.dir/GFem3D.cpp.o -o GFem3D  -Wl,-rpath,/home/giavancini/bin/neopz/pz/lib ../NeoPZ_extensions/libGFEM_library.a /home/giavancini/bin/neopz/pz/lib/libpz.so 

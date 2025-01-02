@@ -1,1 +1,0 @@
-/usr/bin/g++ -g CMakeFiles/GFem2D.dir/GFem2D.cpp.o -o GFem2D  -Wl,-rpath,/home/giavancini/bin/neopz/pz/lib ../NeoPZ_extensions/libGFEM_library.a /home/giavancini/bin/neopz/pz/lib/libpz.so 
