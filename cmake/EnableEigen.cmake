@@ -25,7 +25,7 @@ function(enable_eigen target)
                 set(DOWNLOADED_EIGEN TRUE)
             endif()
 
-            set(EIGEN3_INCLUDE_DIR ${eigen_SOURCE_DIR})
+            set(EIGEN3_INCLUDE_DIR ${eigen_SOURCE_DIR} PARENT_SCOPE)
             message("EIGEN3_INCLUDE_DIR: ${EIGEN3_INCLUDE_DIR}")
             set(EIGEN3_FOUND TRUE)
         endif()
