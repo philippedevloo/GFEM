@@ -13,8 +13,6 @@ include(cmake/StandardProjectSettings.cmake)
 
 find_package(NeoPZ REQUIRED HINTS ${CMAKE_SOURCE_DIR}/../neopz_install/ ${CMAKE_SOURCE_DIR}/neopz_install/)
 
-find_package(Eigen3 REQUIRED)
-
 # Mac OS X specific code
 if (APPLE)
   add_definitions(-DMACOSX)

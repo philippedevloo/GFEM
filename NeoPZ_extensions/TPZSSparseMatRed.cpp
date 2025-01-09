@@ -52,7 +52,7 @@ TPZMatrix<TVar>( 0, 0 ), fK00(0), fK00Auto(), fK11(0,0),fK01(0,0),fK10(0,0),fF0(
 }
 
 template<class TVar>
-TPZSparseMatRed<TVar>::TPZSparseMatRed( int64_t dim, int64_t dim00 ):
+TPZSparseMatRed<TVar>::TPZSparseMatRed(const int64_t dim, const int64_t dim00 ):
 TPZRegisterClassId(&TPZSparseMatRed::ClassId),
 TPZMatrix<TVar>( dim,dim ), fK11(dim-dim00,dim-dim00), fK01(dim00,dim-dim00),
 fK10(dim-dim00,dim00), fF0(dim00,1,0.),fF1(dim-dim00,1,0.)
@@ -824,5 +824,5 @@ void TPZSparseMatRed<TVar>::AllocateSubMatrices(TPZMatrix<TVar> &mat) {
 }
 
 template class TPZSparseMatRed<double>;
-template class TPZSparseMatRed<float>;
+// template class TPZSparseMatRed<float>;
 
