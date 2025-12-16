@@ -10,7 +10,7 @@ void TPZGFemOrthogonal::BuildNodePatches()
     // BuildNodePatches implementation
     int64_t nconnects = fMultiphysicsCompMesh->NConnects();
     int64_t nelem = fMultiphysicsCompMesh->NElements();
-    TPZVec<TPZCompMesh *> &meshvec = fMultiphysicsCompMesh->MeshVector();
+    const TPZVec<TPZCompMesh *> &meshvec = fMultiphysicsCompMesh->MeshVector();
     TPZGFemCompMesh *gfemmesh = dynamic_cast<TPZGFemCompMesh *>(meshvec[2]);
     TPZStack<int64_t> elgraph;
     TPZVec<int64_t> nodtoelgraph;
@@ -483,7 +483,7 @@ int64_t TPZGFemOrthogonal::LargestEigenvalueRatio() {
 // represent the orthogonalization graphically
 void TPZGFemOrthogonal::DrawOrthogonalization(int gfemconnectindex, const std::string &filename){
     // Draw the shape function
-    TPZVec<TPZCompMesh *> &meshvec = fMultiphysicsCompMesh->MeshVector();
+    const TPZVec<TPZCompMesh *> &meshvec = fMultiphysicsCompMesh->MeshVector();
     TPZGFemCompMesh *gfemmesh = dynamic_cast<TPZGFemCompMesh *>(meshvec[2]);
     int firstconnectgfem = meshvec[0]->NConnects()+meshvec[1]->NConnects();
     for(int i=0; i<meshvec.size(); i++) {

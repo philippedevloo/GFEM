@@ -376,7 +376,7 @@ void BuildBlueRedElements(TPZGeoMesh *gmesh, std::set<int64_t> &blue, std::set<i
             if(!gmesh->Element(el)->HasSubElement()) color[el] = -1;
         }
         std::ofstream out("color.vtk");
-        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out, color,true);
+        TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out, color,"color",true);
     }
 }
 
