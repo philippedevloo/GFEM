@@ -38,8 +38,7 @@ public:
         /*! Creates solver matrix and assembles it alongside global rhs.
      Avoid overriding it unless there are no other options*/
     virtual TPZBaseMatrix *
-    CreateAssemble(TPZBaseMatrix &rhs,
-                   TPZAutoPointer<TPZGuiInterface> guiInterface) override;
+    CreateAssemble(TPZBaseMatrix &rhs) override;
 
     void EndCreateAssemble(TPZBaseMatrix *mat) override;
 

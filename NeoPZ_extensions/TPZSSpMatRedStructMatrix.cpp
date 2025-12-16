@@ -64,9 +64,8 @@ TPZStructMatrix * TPZSSpMatRedStructMatrix<TVar,TPar>::Clone(){
     Avoid overriding it unless there are no other options*/
 template<class TVar, class TPar>
 TPZBaseMatrix *
-TPZSSpMatRedStructMatrix<TVar,TPar>::CreateAssemble(TPZBaseMatrix &rhs,
-                   TPZAutoPointer<TPZGuiInterface> guiInterface) {
-    auto result = TPar::CreateAssemble(rhs,guiInterface);
+TPZSSpMatRedStructMatrix<TVar,TPar>::CreateAssemble(TPZBaseMatrix &rhs) {
+    auto result = TPar::CreateAssemble(rhs);
      auto spMat = dynamic_cast<TPZSparseMatRed<TVar> *>(result);
     if(!spMat) DebugStop();
     TPZFMatrix<TVar> *rhsF = dynamic_cast<TPZFMatrix<TVar> *>(&rhs);
@@ -121,7 +120,7 @@ TPZAutoPointer<TPZMatrix<TVar>>  TPZSSpMatRedStructMatrix<TVar,TPar>::CloneK11(T
 #elif USING_EIGEN
     TPZEigenSparseMatrix<TVar> * mat = new TPZEigenSparseMatrix<TVar>(*matK11);
 #else
-    TPZFYsmpMatrix<TVar> *mat = new TPZFYsmpMatrix<TVar>(*matK11);
+    TPZSYsmpMatrix<TVar> *mat = new TPZSYsmpMatrix<TVar>(*matK11);
     DebugStop();
 #endif
 

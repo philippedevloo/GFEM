@@ -62,7 +62,7 @@ fK10(dim-dim00,dim00), fF0(dim00,1,0.),fF1(dim-dim00,1,0.)
 #elif USING_EIGEN
     TPZEigenSparseMatrix<TVar> * mat = new TPZEigenSparseMatrix<TVar>(dim00,dim00);
 #else
-    TPZFYsmpMatrix<TVar> *mat = new TPZFYsmpMatrix<TVar>(dim00,dim00);
+    TPZSYsmpMatrix<TVar> *mat = new TPZSYsmpMatrix<TVar>(dim00,dim00);
     DebugStop();
 #endif
   fK00 = mat;
@@ -826,3 +826,5 @@ void TPZSparseMatRed<TVar>::AllocateSubMatrices(TPZMatrix<TVar> &mat) {
 template class TPZSparseMatRed<double>;
 // template class TPZSparseMatRed<float>;
 
+template class TPZSparseMatRed<std::complex<double>>;
+template class TPZSparseMatRed<std::complex<float>>;
