@@ -1,0 +1,47 @@
+{
+  "radius" : 1.0,
+
+  "angles" : [
+      0.0,
+      1.57,
+      3.141592653589793,
+      4.71238898038469,
+      6.283185307179586      
+    ],
+  "sector material ids" : [ 1, 2, 1, 2 ],
+  "problem_type" : "Elastic",
+
+  "materials": [
+    {
+      "name": "One Sector",
+      "tension state" : "plane stress",
+      "matid": 1,
+      "orthotropic" : {
+        "direction" : [1.0, 0.0],
+        "Ex" : 1,
+        "Ey" : 1,
+        "nuxy" : 0.3,
+        "Gxy" : 0.4
+      }
+    },
+    {
+      "name": "Another Sector",
+      "tension state" : "plane stress",
+      "matid": 2,
+      "isotropic" : {
+        "young": 1,
+        "poisson": 0.3
+      }
+    }
+  ],
+    
+
+  "directory" : "SBFemModes",
+
+  "PostProcess" : [
+      "displacement",
+      "SigmaX",
+      "SigmaY",
+      "TauXY"
+    ]
+}
