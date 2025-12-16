@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build test_TPZGFemEnrichment",
+      "type": "shell",
+      "command": "cmake --build ${workspaceFolder}/build --target test_TPZGFemEnrichment -- -j",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

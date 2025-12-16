@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch test_TPZGFemEnrichment (LLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/NeoPZ_extensions/test_TPZGFemEnrichment",
+      "args": [],
+      "cwd": "${workspaceFolder}/build/NeoPZ_extensions",
+      "stopOnEntry": false,
+      "preLaunchTask": "build test_TPZGFemEnrichment",
+      "env": {
+        "DYLD_LIBRARY_PATH": "${workspaceFolder}/neopz_install/pz/lib"
+      },
+      "sourceLanguages": ["c++"]
+    }
+  ]
+}
