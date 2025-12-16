@@ -5,7 +5,21 @@ project (GFEM)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Enable CTest so subdirectory add_test() calls produce top-level test registration
+enable_testing()
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
+# Add path to auxiliary CMake file
+#list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Include autodiff fetcher
+
+#include(Findpybind)
+
+#find_package(pybind11 REQUIRED)
+
+include(FetchAutodiff)
+
 
 include(cmake/StandardProjectSettings.cmake)
 
@@ -38,12 +52,19 @@ if (ENABLE_ALL_WARNINGS)
     set(CMAKE_CXX_FLAGS "")
 endif ()
 
+find_package(nlohmann_json 3.2.0 REQUIRED)
+
 #include_directories(/Users/philippedevloo/GitHub/GFemResearch/neopz_GFEM/build-cmake/_deps/eigen-src)
 include_directories(${CMAKE_SOURCE_DIR}/NeoPZ_extensions)
 
+# Catch2 is required for unit tests in subdirectories (must be found before
+# adding subdirectories that create test targets so imported targets are
+# available). Find Catch2 here so its imported targets are visible to
+# subdirectories such as NeoPZ_extensions.
+find_package(Catch2 REQUIRED)
+
 # Creates GFEMLib with common extension classes
 add_subdirectory(NeoPZ_extensions)
-
 
 
 # Creates ErrorEstimationLib with common error estimation file
