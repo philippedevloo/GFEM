@@ -7,6 +7,7 @@ FetchContent_Declare(
     GIT_TAG        v1.1.0   # or any version tag you prefer
 )
 set(AUTODIFF_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
+set(AUTODIFF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 #set(AUTODIFF_USE_EIGEN OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(autodiff)
 

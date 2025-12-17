@@ -1,0 +1,5 @@
+function(add_unit_test testName)
+    add_test(${testName} ${testName})
+    add_executable(${testName} ${ARGN})
+    target_link_libraries(${testName} PRIVATE test_library)
+endfunction()
