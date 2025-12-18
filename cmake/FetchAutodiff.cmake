@@ -16,3 +16,5 @@ add_library(autodiff2 INTERFACE)
 target_include_directories(autodiff2 INTERFACE
     ${autodiff_SOURCE_DIR}
 )
+# autodiff requires Eigen3
+target_link_libraries(autodiff2 INTERFACE Eigen3::Eigen)

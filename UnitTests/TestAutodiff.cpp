@@ -1,8 +1,8 @@
 #include <iostream>
-// #include <array>
-// #include <autodiff/forward/dual.hpp>
+#include <array>
+#include <autodiff/forward/dual.hpp>
 
-//using autodiff::dual2nd;
+using autodiff::dual2nd;
 
 /*
 // --------------------------------------------------------
